@@ -122,6 +122,25 @@ class TestPlanRun:
         assert "no-such-plan" in result.stderr
 
 
+class TestBundledPlans:
+    def test_synthesis_full_runs_end_to_end_with_a_model_override(self, tmp_path):
+        result = invoke("plan", "run", "synthesis_full", "the question", "-m", "echo")
+
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.startswith("ECHO[")
+        assert "## Opus Analysis" in result.stdout
+        assert "## GPT-5 Analysis" in result.stdout
+        assert "Synthesis Instructions" in result.stdout
+        assert "the question" in result.stdout
+
+    def test_show_prints_the_bundled_yaml(self):
+        result = invoke("plan", "show", "synthesis_full")
+
+        assert result.exit_code == 0
+        assert "name: \"synthesis_full\"" in result.stdout
+        assert "plan_synthesis_full.yaml" in result.stderr
+
+
 class TestExplain:
     def test_explain_prints_the_dag_without_executing(self, tmp_path, fake_models):
         stages = [
