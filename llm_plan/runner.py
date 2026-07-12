@@ -348,7 +348,8 @@ class PlanRunner:
         except PlanError as exc:
             return failure(str(exc))
 
-        input_files = self._script_input_files(stage, deps, failed, scratch)
+        index = next(i for i, s in enumerate(self.plan.stages) if s.name == stage.name)
+        input_files = self._script_input_files(stage, index, deps, failed, scratch)
         command = [stage.python, str(stage.resolved_script)]
         command += plan_args + args + [str(path) for path in input_files]
 
@@ -415,9 +416,15 @@ class PlanRunner:
         )
 
     def _script_input_files(
-        self, stage: Stage, deps: list[str], failed: set[str], scratch: Path
+        self, stage: Stage, index: int, deps: list[str], failed: set[str], scratch: Path
     ) -> list[Path]:
-        """Dependency outputs as file paths; LLM text is materialised to disk."""
+        """Input paths for a script, in llm_cli's argv order.
+
+        Dependency outputs first (LLM text materialised to disk), then the
+        stage's own ``files:``, then routed CLI seed files - a file-backed
+        fragment contributes its original path, any other fragment is written
+        into the scratch directory.
+        """
         paths: list[Path] = []
         for dep in deps:
             if dep == SEED or dep in failed:
@@ -428,6 +435,18 @@ class PlanRunner:
                 target = scratch / f"{dep}.md"
                 target.write_text(self._text[dep], encoding="utf-8")
                 paths.append(target)
+
+        paths.extend(ref.path for ref in stage.resolved_files)
+
+        if self._wants_cli_files(stage, index, deps, prompt_wants_files=False):
+            for position, fragment in enumerate(self.cli.fragments, 1):
+                source = getattr(fragment, "source", None)
+                if source and Path(source).is_file():
+                    paths.append(Path(source))
+                else:
+                    target = scratch / f"fragment-{position}.md"
+                    target.write_text(str(fragment), encoding="utf-8")
+                    paths.append(target)
         return paths
 
     def _scratch(self) -> Path:
@@ -447,7 +466,7 @@ class PlanRunner:
             stage.prompt, stage.name, self.cli.instructions, self._text, self.plan.base_dir
         )
 
-        wants_cli_files = self._wants_cli_files(stage, index, deps, spec.wants_cli_files)
+        wants_cli_files = self._wants_cli_files(stage, index, deps, prompt_wants_files=spec.wants_cli_files)
         if spec.requires_cli_content and not self.cli.has_content:
             raise PlanError(
                 f"Stage '{stage.name}' uses prompt \"CLI\" but no input was provided. "
@@ -534,7 +553,7 @@ class PlanRunner:
         return prompt_text, fragments, attachments, model, options
 
     def _wants_cli_files(
-        self, stage: Stage, index: int, deps: list[str], prompt_wants_files: bool
+        self, stage: Stage, index: int, deps: list[str], *, prompt_wants_files: bool
     ) -> bool:
         if prompt_wants_files:
             return True

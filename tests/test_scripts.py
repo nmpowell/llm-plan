@@ -162,6 +162,45 @@ class TestScriptInputs:
         record = json.loads(results["consumer"].text)
         assert record["inputs"] == ["first file body", "second file body"]
 
+    def test_stage_files_are_passed_after_dependency_outputs(self, tmp_path):
+        (tmp_path / "reference.md").write_text("reference body", encoding="utf-8")
+        stages = [
+            {"name": "thinker", "summary": "s", "model": "echo", "prompt": "CLI"},
+            script_stage(tmp_path, RECORDER_SCRIPT, name="worker",
+                         depends_on=["thinker"],
+                         files=[{"path": "reference.md", "label": "Reference"}]),
+        ]
+
+        runner, results = run_plan(tmp_path, stages, CLIContext(instructions="hi"))
+
+        record = json.loads(results["worker"].text)
+        assert record["inputs"] == ["ECHO[hi]", "reference body"]
+
+    def test_first_stage_script_receives_seed_file_fragments(self, tmp_path):
+        seed = tmp_path / "seed.md"
+        seed.write_text("seed body", encoding="utf-8")
+        fragment = type("Fragment", (str,), {"source": str(seed)})("seed body")
+        stage = script_stage(tmp_path, RECORDER_SCRIPT)
+
+        runner, results = run_plan(tmp_path, [stage], CLIContext(fragments=[fragment]))
+
+        record = json.loads(results["worker"].text)
+        assert record["argv"] == [str(seed)]
+        assert record["inputs"] == ["seed body"]
+
+    def test_seed_dependent_script_gets_pathless_fragments_materialised(self, tmp_path):
+        stages = [
+            {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
+            script_stage(tmp_path, RECORDER_SCRIPT, name="worker",
+                         depends_on=["seed"]),
+        ]
+        cli = CLIContext(instructions="hi", fragments=["fragment text with no path"])
+
+        runner, results = run_plan(tmp_path, stages, cli)
+
+        record = json.loads(results["worker"].text)
+        assert record["inputs"] == ["fragment text with no path"]
+
     def test_unknown_runtime_variable_in_plan_args_fails_the_stage(self, tmp_path):
         stage = script_stage(tmp_path, RECORDER_SCRIPT)
         cli = CLIContext(plan_args=["${cli.bogus}"])
