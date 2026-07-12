@@ -7,10 +7,10 @@
 # synthesis stage receives only the original question plus every analysis,
 # and still runs if some analysts fail (partial_dependencies).
 #
-# The stage layout matches the plan this package grew out of; the bundled
-# synthesis prompt (prompts/synthesise.md) is a compact general-purpose one.
-# To use your own, copy this plan and _defaults.yaml into `llm plan path`
-# (same-alias plans there shadow this bundled copy).
+# The bundled synthesis prompt (prompts/synthesise.md) is a compact
+# general-purpose one. To customise it or the stages, copy this plan and
+# _defaults.yaml into `llm plan path` (same-alias plans there shadow this
+# bundled copy).
 extends: "_defaults.yaml"
 
 name: "synthesis_full"

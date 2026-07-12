@@ -1,6 +1,7 @@
 import json
 import textwrap
 
+import llm
 import pytest
 import yaml
 
@@ -206,7 +207,7 @@ class TestScriptInputs:
     def test_first_stage_script_receives_seed_file_fragments(self, tmp_path):
         seed = tmp_path / "seed.md"
         seed.write_text("seed body", encoding="utf-8")
-        fragment = type("Fragment", (str,), {"source": str(seed)})("seed body")
+        fragment = llm.Fragment("seed body", source=str(seed))
         stage = script_stage(tmp_path, RECORDER_SCRIPT)
 
         runner, results = run_plan(tmp_path, [stage], CLIContext(fragments=[fragment]))

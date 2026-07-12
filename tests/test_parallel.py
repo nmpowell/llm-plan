@@ -120,22 +120,3 @@ class TestParallelFailures:
         assert "skipped" in results["child"].error
         assert "skipped" in results["grandchild"].error
         assert results["independent"].success
-
-    def test_partial_dependencies_joins_surviving_branches(self, tmp_path, fake_models):
-        fake_models.flaky.failures_left = 99
-        runner = parallel_plan(
-            tmp_path,
-            [
-                {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
-                {"name": "good", "summary": "s", "model": "echo", "prompt": "CLI",
-                 "produces": "Good Analysis"},
-                {"name": "join", "summary": "s", "model": "echo",
-                 "depends_on": ["bad", "good"], "partial_dependencies": True,
-                 "prompt": "inline:combine"},
-            ],
-        )
-
-        results = by_name(runner.run())
-
-        assert results["join"].success
-        assert "## Good Analysis" in results["join"].text

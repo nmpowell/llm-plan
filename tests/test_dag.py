@@ -68,7 +68,7 @@ class TestValidatePlan:
             validate_plan(make_plan(make_stage("twin"), make_stage("twin")))
 
     def test_self_dependency_is_an_error(self):
-        with pytest.raises(PlanError):
+        with pytest.raises(PlanError, match="'a' depends on 'a'"):
             validate_plan(make_plan(make_stage("a", depends_on=["a"])))
 
 

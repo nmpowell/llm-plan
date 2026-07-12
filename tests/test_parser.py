@@ -284,6 +284,10 @@ class TestParsePlan:
             (lambda s: s.update(env=["a"]), "mapping"),
             (lambda s: s.update(options=["a"]), "mapping"),
             (lambda s: s.update(script_args="oops"), "list"),
+            (lambda s: s.update(files=None), "'files' must be a list"),
+            (lambda s: s.update(files="context.md"), "'files' must be a list"),
+            (lambda s: s.update(attachments=42), "'attachments' must be a list"),
+            (lambda s: s.update(attachments={}), "'attachments' must be a list"),
         ],
     )
     def test_stage_validation_errors(self, tmp_path, mutation, message):
@@ -355,6 +359,28 @@ class TestParsePlan:
         plan_file = write_yaml(tmp_path / "plan.yaml", data)
 
         with pytest.raises(PlanError, match="gone.md"):
+            parse_plan(plan_file)
+
+    @pytest.mark.parametrize(
+        "bad_entry", ["context.md", {"label": "Context"}], ids=["bare-string", "no-path"]
+    )
+    def test_malformed_files_entry_is_a_plan_error(self, tmp_path, bad_entry):
+        data = minimal_plan()
+        data["stages"][0]["files"] = [bad_entry]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="files"):
+            parse_plan(plan_file)
+
+    @pytest.mark.parametrize(
+        "bad_entry", ["img.png", {"label": "Diagram"}], ids=["bare-string", "no-path"]
+    )
+    def test_malformed_attachments_entry_is_a_plan_error(self, tmp_path, bad_entry):
+        data = minimal_plan()
+        data["stages"][0]["attachments"] = [bad_entry]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="attachments"):
             parse_plan(plan_file)
 
     def test_url_attachments_pass_through_and_paths_must_exist(self, tmp_path):

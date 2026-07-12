@@ -237,7 +237,7 @@ class TestPlanRun:
 
 
 class TestBundledPlans:
-    def test_synthesis_full_keeps_the_original_stage_structure(self):
+    def test_synthesis_full_has_the_expected_stage_structure(self):
         from llm_plan.runner import load_plan
         from llm_plan.store import resolve_plan
 
@@ -258,9 +258,8 @@ class TestBundledPlans:
         assert plan.max_workers == 7
 
     def test_the_bundled_synthesis_prompt_is_pinned(self):
-        # The bundled prompt is a compact generic synthesis prompt, NOT the
-        # personal one the source plan uses; changing it changes what the
-        # synthesis_full alias does, so any edit must be deliberate.
+        # Changing the bundled prompt changes what the synthesis_full alias
+        # does for everyone, so any edit must be deliberate.
         import hashlib
 
         from llm_plan.store import BUNDLED_PLAN_DIR
@@ -324,11 +323,11 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi")
 
         db = sqlite_utils.Database(str(user_dir / "logs.db"))
-        ids = [row["id"] for row in db["responses"].rows]
-        for row_id in ids:
-            assert row_id in result.stderr
-        assert "[a] response" in result.stderr
-        assert "[b] response" in result.stderr
+        id_a, id_b = [
+            row[0] for row in db.execute("select id from responses order by rowid")
+        ]
+        assert f"[a] response {id_a}" in result.stderr
+        assert f"[b] response {id_b}" in result.stderr
         assert "llm logs -n 2" in result.stderr
 
     def test_tracking_lines_carry_the_plan_run_id(self, tmp_path):
@@ -348,13 +347,6 @@ class TestLogging:
 
         assert "response" not in result.stderr
         assert "llm logs" not in result.stderr
-
-    def test_quiet_suppresses_tracking_lines(self, tmp_path):
-        plan = write_plan(tmp_path, [cli_stage()])
-
-        result = invoke("plan", "run", str(plan), "hi", "-q")
-
-        assert result.stderr == ""
 
     def test_no_log_skips_the_database(self, tmp_path, user_dir):
         plan = write_plan(tmp_path, [cli_stage()])

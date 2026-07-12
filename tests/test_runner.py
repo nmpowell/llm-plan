@@ -13,9 +13,11 @@ def write_plan(tmp_path, stages, **top_level):
     return plan_file
 
 
-def run_plan(tmp_path, stages, cli=None, **runner_kwargs):
+def run_plan(tmp_path, stages, cli=None, max_workers=1, **runner_kwargs):
     """Run a plan; sequential-abort errors are tolerated so results stay inspectable."""
-    plan = load_plan(write_plan(tmp_path, stages))
+    plan = load_plan(
+        write_plan(tmp_path, stages, parallel_config={"max_workers": max_workers})
+    )
     runner = PlanRunner(plan, cli or CLIContext(), retry_delay=0, **runner_kwargs)
     try:
         runner.run()
@@ -204,7 +206,7 @@ class TestPromptComposition:
 
 
 class TestGoldenComposition:
-    def test_composed_prompt_matches_the_legacy_shape_exactly(self, tmp_path, fake_models):
+    def test_composed_prompt_matches_the_pinned_shape_exactly(self, tmp_path, fake_models):
         (tmp_path / "ctx.md").write_text("context body\n", encoding="utf-8")
         (tmp_path / "guide.md").write_text("guide body\n", encoding="utf-8")
         stages = [
@@ -282,7 +284,9 @@ class TestCliContextRouting:
         late_prompt = fake_models.echo.prompts[-1]
         assert late_prompt.fragments == ["seed fragment text"]
 
-    def test_first_stage_without_prompt_gets_cli_files_automatically(self, tmp_path, fake_models):
+    def test_first_stage_without_a_cli_prompt_still_receives_seed_files(
+        self, tmp_path, fake_models
+    ):
         stages = [
             {"name": "solo", "summary": "s", "model": "echo", "prompt": "inline:Describe input."},
         ]
@@ -385,7 +389,10 @@ class TestFailureHandling:
         assert not results["after"].success
         assert "bad" in results["after"].error
 
-    def test_partial_dependencies_runs_with_surviving_outputs(self, tmp_path, fake_models):
+    @pytest.mark.parametrize("max_workers", [1, 4], ids=["sequential", "parallel"])
+    def test_partial_dependencies_joins_only_surviving_outputs(
+        self, tmp_path, fake_models, max_workers
+    ):
         fake_models.flaky.failures_left = 10
         stages = [
             {"name": "good", "summary": "s", "model": "echo", "prompt": "CLI",
@@ -396,11 +403,32 @@ class TestFailureHandling:
              "prompt": "inline:Synthesise."},
         ]
 
-        runner, results = run_plan(tmp_path, stages, CLIContext(instructions="hi"))
+        runner, results = run_plan(
+            tmp_path, stages, CLIContext(instructions="hi"), max_workers=max_workers
+        )
 
         assert results["synthesis"].success
         assert "## Good Analysis" in results["synthesis"].text
-        assert "bad" not in results["synthesis"].text.lower().replace("flaky-ok", "")
+        assert "## Output from bad" not in results["synthesis"].text
+
+    @pytest.mark.parametrize("max_workers", [1, 4], ids=["sequential", "parallel"])
+    def test_continue_on_failure_dependents_run_after_a_failed_dependency(
+        self, tmp_path, fake_models, max_workers
+    ):
+        fake_models.flaky.failures_left = 10
+        stages = [
+            {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
+            {"name": "rescue", "summary": "s", "model": "echo", "prompt": "CLI",
+             "depends_on": ["bad"], "continue_on_failure": True},
+        ]
+
+        runner, results = run_plan(
+            tmp_path, stages, CLIContext(instructions="hi"), max_workers=max_workers
+        )
+
+        assert not results["bad"].success
+        assert results["rescue"].success
+        assert results["rescue"].text == "ECHO[hi]"
 
     def test_sequential_failure_aborts_before_later_stages_spend_money(
         self, tmp_path, fake_models
@@ -417,21 +445,6 @@ class TestFailureHandling:
             runner.run()
 
         assert fake_models.echo.prompts == []
-
-    def test_sequential_failure_continues_when_the_next_stage_tolerates_it(
-        self, tmp_path, fake_models
-    ):
-        fake_models.flaky.failures_left = 10
-        stages = [
-            {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
-            {"name": "rescue", "summary": "s", "model": "echo", "prompt": "CLI",
-             "depends_on": ["bad"], "partial_dependencies": True},
-        ]
-
-        runner, results = run_plan(tmp_path, stages, CLIContext(instructions="hi"))
-
-        assert not results["bad"].success
-        assert results["rescue"].success
 
 
 class TestResponses:

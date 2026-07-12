@@ -173,7 +173,7 @@ class PlanRunner:
             result, response = self._run_stage(stage, index, deps, failed)
             self._finish(stage, result, response, failed)
             if not result.success and not self._next_stage_tolerates_failure(index):
-                # Abort rather than spend on later stages (llm_cli behaviour).
+                # Abort rather than spend on later stages.
                 raise PlanError(f"Stage '{stage.name}' failed: {result.error}")
 
     def _next_stage_tolerates_failure(self, index: int) -> bool:
@@ -459,7 +459,7 @@ class PlanRunner:
     def _script_input_files(
         self, stage: Stage, index: int, deps: list[str], failed: set[str], scratch: Path
     ) -> list[Path]:
-        """Input paths for a script, in llm_cli's argv order.
+        """Input paths for a script, in a stable documented order.
 
         Dependency outputs first (LLM text materialised to disk), then the
         stage's own ``files:``, then routed CLI seed files - a file-backed
@@ -523,10 +523,10 @@ class PlanRunner:
                 f"-a/--attachment."
             )
 
-        # Composition mirrors llm_cli's PromptBuilder: file-backed sections are
-        # code-fenced under "## <label>" headings with "---" separators; plain
-        # instruction text lands under "Additional Instructions" when other
-        # content exists, and stays raw when it is the whole prompt.
+        # Composition format: file-backed sections are code-fenced under
+        # "## <label>" headings with "---" separators; plain instruction text
+        # lands under "Additional Instructions" when other content exists,
+        # and stays raw when it is the whole prompt.
         fenced_sections: list[tuple[str, str]] = []
         for ref in stage.resolved_files:
             fenced_sections.append((ref.label or ref.path.name, _read(ref.path, stage.name)))
@@ -573,7 +573,7 @@ class PlanRunner:
             prompt_text = "\n\n".join(text.strip() for _, text in spec_parts)
         else:
             # Each part keeps its listed position; label-less parts sit under
-            # their own "Additional Instructions" heading, as llm_cli's -i did.
+            # their own "Additional Instructions" heading.
             rendered += [
                 _render_section(label or "Additional Instructions", text, fenced=False)
                 for label, text in spec_parts

@@ -374,15 +374,30 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         # Fail fast on a missing scalar file prompt, before any stage runs.
         parse_prompt_field(prompt, name, base_dir=plan_file.parent)
 
+    files_data = stage_data.get("files", [])
+    if not isinstance(files_data, list):
+        raise error("'files' must be a list of {path, label} mappings")
     resolved_files = []
-    for spec in stage_data.get("files", []):
+    for spec in files_data:
+        if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+            raise error(
+                f"invalid files entry {spec!r}: expected a mapping with a 'path' string"
+            )
         path = _resolve_path(spec["path"], plan_file)
         if not path.exists():
             raise error(f"file not found: {path}")
         resolved_files.append(FileRef(path=path, label=spec.get("label")))
 
+    attachments_data = stage_data.get("attachments", [])
+    if not isinstance(attachments_data, list):
+        raise error("'attachments' must be a list of {path, label} mappings")
     resolved_attachments = []
-    for spec in stage_data.get("attachments", []):
+    for spec in attachments_data:
+        if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+            raise error(
+                f"invalid attachments entry {spec!r}: expected a mapping with a "
+                f"'path' string"
+            )
         uri = spec["path"]
         if uri.startswith(("http://", "https://")):
             resolved_attachments.append(AttachmentRef(uri=uri, label=spec.get("label")))
