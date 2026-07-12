@@ -84,9 +84,13 @@ def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
     _resolve_seed_inputs(db, fragments, attachments, context)
 
     progress = None if quiet else (lambda message: click.echo(message, err=True))
+    logged: list[tuple[str, str]] = []
     on_response = None
     if logging_enabled(force_log=force_log, no_log=no_log):
-        on_response = lambda stage, response: log_response(db, response)
+
+        def on_response(stage, response):
+            log_response(db, response)
+            logged.append((stage.name, response.id))
 
     runner = PlanRunner(
         loaded, context, on_response=on_response, progress=progress, retries=retries
@@ -94,7 +98,9 @@ def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
     try:
         runner.run()
     except PlanError as exc:
+        _emit_tracking(logged, quiet)
         raise click.ClickException(str(exc))
+    _emit_tracking(logged, quiet)
 
     leaves = runner.leaf_stages()
     succeeded = [runner.results[name] for name in leaves if runner.results[name].success]
@@ -109,6 +115,18 @@ def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
     if failed:
         details = "; ".join(f"{name}: {runner.results[name].error}" for name in failed)
         raise click.ClickException(f"Plan '{loaded.name or plan_ref}' failed - {details}")
+
+
+def _emit_tracking(logged: list, quiet: bool) -> None:
+    """Report stage → response-id mappings so a run is findable in llm logs."""
+    if not logged or quiet:
+        return
+    for stage_name, response_id in logged:
+        click.echo(f"[{stage_name}] response {response_id}", err=True)
+    click.echo(
+        f"Logged {len(logged)} response(s); view with: llm logs -n {len(logged)}",
+        err=True,
+    )
 
 
 def _read_prompt(argument: str | None, instructions: tuple[str, ...] = ()) -> str:

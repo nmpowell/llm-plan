@@ -215,6 +215,34 @@ class TestLogging:
         assert {row["model"] for row in rows} == {"echo"}
         assert rows[0]["response"] == "ECHO[hi]"
 
+    def test_stderr_maps_each_stage_to_its_logged_response_id(self, tmp_path, user_dir):
+        plan = write_plan(tmp_path, [cli_stage("a"), cli_stage("b")])
+
+        result = invoke("plan", "run", str(plan), "hi")
+
+        db = sqlite_utils.Database(str(user_dir / "logs.db"))
+        ids = [row["id"] for row in db["responses"].rows]
+        for row_id in ids:
+            assert row_id in result.stderr
+        assert "[a] response" in result.stderr
+        assert "[b] response" in result.stderr
+        assert "llm logs -n 2" in result.stderr
+
+    def test_no_log_prints_no_tracking_lines(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke("plan", "run", str(plan), "hi", "-n")
+
+        assert "response" not in result.stderr
+        assert "llm logs" not in result.stderr
+
+    def test_quiet_suppresses_tracking_lines(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke("plan", "run", str(plan), "hi", "-q")
+
+        assert result.stderr == ""
+
     def test_no_log_skips_the_database(self, tmp_path, user_dir):
         plan = write_plan(tmp_path, [cli_stage()])
 

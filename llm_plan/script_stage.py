@@ -149,6 +149,8 @@ def emit_outputs(
             spec = {"path": str(item["path"])}
             if item.get("label"):
                 spec["label"] = str(item["label"])
+            if item.get("kind"):
+                spec["kind"] = str(item["kind"])
             specs.append(spec)
         else:
             specs.append({"path": str(item)})
