@@ -32,6 +32,17 @@ class TestSingleStage:
         assert results["solo"].text == "ECHO[What is love?]"
         assert results["solo"].response_id
 
+    def test_stages_stream_their_responses(self, tmp_path, fake_models):
+        # Anthropic's SDK rejects non-streaming requests whose max_tokens
+        # implies a long run; llm streams by default and so must plan stages.
+        run_plan(
+            tmp_path,
+            [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}],
+            CLIContext(instructions="hi"),
+        )
+
+        assert fake_models.echo.stream_flags == [True]
+
     def test_plain_cli_stage_with_no_cli_content_fails_helpfully(self, tmp_path):
         runner, results = run_plan(
             tmp_path,

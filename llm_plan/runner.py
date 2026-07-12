@@ -285,12 +285,13 @@ class PlanRunner:
                 time.sleep(self.retry_delay)
             try:
                 # Options go as **kwargs: llm 0.31 has no options= parameter,
-                # and 0.32 accepts both forms.
+                # and 0.32 accepts both forms. Streaming stays on - Anthropic's
+                # SDK rejects non-streaming requests it deems long-running.
                 response = model.prompt(
                     prompt_text or None,
                     fragments=fragments or None,
                     attachments=attachments or None,
-                    stream=False,
+                    stream=True,
                     **options,
                 )
                 text = response.text()

@@ -32,9 +32,11 @@ class EchoModel(llm.Model):
     def __init__(self, model_id="echo"):
         self.model_id = model_id
         self.prompts = []
+        self.stream_flags = []
 
     def execute(self, prompt, stream, response, conversation):
         self.prompts.append(prompt)
+        self.stream_flags.append(stream)
         yield f"{self.model_id.upper()}[{prompt.prompt}]"
 
 
