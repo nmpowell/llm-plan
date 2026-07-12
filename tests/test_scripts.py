@@ -3,6 +3,7 @@ import textwrap
 
 import yaml
 
+from llm_plan.models import PlanError
 from llm_plan.runner import CLIContext, PlanRunner, load_plan
 
 WRITER_SCRIPT = """
@@ -41,12 +42,16 @@ def write_script(tmp_path, body, name="script.py"):
 
 
 def run_plan(tmp_path, stages, cli=None):
+    """Run a plan; sequential-abort errors are tolerated so results stay inspectable."""
     data = {"name": "test", "summary": "script test plan", "stages": stages}
     plan_file = tmp_path / "plan.yaml"
     plan_file.write_text(yaml.safe_dump(data), encoding="utf-8")
     runner = PlanRunner(load_plan(plan_file), cli or CLIContext(), retry_delay=0)
-    results = runner.run()
-    return runner, {r.name: r for r in results}
+    try:
+        runner.run()
+    except PlanError:
+        pass
+    return runner, dict(runner.results)
 
 
 def script_stage(tmp_path, body, name="worker", script_name="script.py", **kwargs):

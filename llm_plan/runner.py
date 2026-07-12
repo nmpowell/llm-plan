@@ -138,14 +138,24 @@ class PlanRunner:
 
     def _run_sequential(self) -> None:
         failed: set[str] = set()
-        total = len(self.plan.stages)
-        for index, stage in enumerate(self.plan.stages):
-            deps = resolve_dependencies(stage, index, self.plan.stages)
+        stages = self.plan.stages
+        total = len(stages)
+        for index, stage in enumerate(stages):
+            deps = resolve_dependencies(stage, index, stages)
             if self._skip_for_failed_deps(stage, deps, failed):
                 continue
             self.progress(f"Stage {index + 1}/{total}: {stage.name} - {stage.summary}")
             result, response = self._run_stage(stage, index, deps, failed)
             self._finish(stage, result, response, failed)
+            if not result.success and not self._next_stage_tolerates_failure(index):
+                # Abort rather than spend on later stages (llm_cli behaviour).
+                raise PlanError(f"Stage '{stage.name}' failed: {result.error}")
+
+    def _next_stage_tolerates_failure(self, index: int) -> bool:
+        following = self.plan.stages[index + 1 : index + 2]
+        return bool(following) and (
+            following[0].partial_dependencies or following[0].continue_on_failure
+        )
 
     def _run_parallel(self) -> None:
         """DAG scheduling over a thread pool.

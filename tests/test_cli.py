@@ -93,7 +93,23 @@ class TestPlanRun:
         assert "## a" in result.stdout
         assert "## b" in result.stdout
 
-    def test_failed_leaf_exits_non_zero(self, tmp_path, fake_models):
+    def test_failed_leaf_exits_non_zero_but_successful_leaves_still_print(
+        self, tmp_path, fake_models
+    ):
+        fake_models.flaky.failures_left = 99
+        plan = write_plan(
+            tmp_path,
+            [cli_stage("bad", model="flaky"), cli_stage("good")],
+            parallel_config={"max_workers": 2},
+        )
+
+        result = invoke("plan", "run", str(plan), "hi", "--retries", "0")
+
+        assert result.exit_code != 0
+        assert "ECHO[hi]" in result.stdout
+        assert "bad" in result.stderr
+
+    def test_sequential_failure_aborts_with_a_clean_error(self, tmp_path, fake_models):
         fake_models.flaky.failures_left = 99
         plan = write_plan(
             tmp_path, [cli_stage("bad", model="flaky"), cli_stage("good")]
@@ -102,8 +118,8 @@ class TestPlanRun:
         result = invoke("plan", "run", str(plan), "hi", "--retries", "0")
 
         assert result.exit_code != 0
-        assert "ECHO[hi]" in result.stdout
         assert "bad" in result.stderr
+        assert result.stdout == ""
 
     def test_progress_goes_to_stderr_and_quiet_silences_it(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])

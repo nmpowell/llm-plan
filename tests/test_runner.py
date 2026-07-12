@@ -14,10 +14,14 @@ def write_plan(tmp_path, stages, **top_level):
 
 
 def run_plan(tmp_path, stages, cli=None, **runner_kwargs):
+    """Run a plan; sequential-abort errors are tolerated so results stay inspectable."""
     plan = load_plan(write_plan(tmp_path, stages))
     runner = PlanRunner(plan, cli or CLIContext(), retry_delay=0, **runner_kwargs)
-    results = runner.run()
-    return runner, {r.name: r for r in results}
+    try:
+        runner.run()
+    except PlanError:
+        pass
+    return runner, dict(runner.results)
 
 
 class TestSingleStage:
@@ -290,25 +294,30 @@ class TestFailureHandling:
         assert "transient upstream error" in results["solo"].error
         assert fake_models.flaky.calls == 3
 
-    def test_dependents_of_a_failed_stage_are_skipped(self, tmp_path, fake_models):
+    def test_intolerant_dependents_after_a_tolerated_failure_are_skipped(
+        self, tmp_path, fake_models
+    ):
         fake_models.flaky.failures_left = 10
         stages = [
             {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
+            {"name": "rescue", "summary": "s", "model": "echo", "prompt": "CLI",
+             "depends_on": ["bad"], "partial_dependencies": True},
             {"name": "after", "summary": "s", "model": "echo",
              "depends_on": ["bad"], "prompt": "inline:Continue."},
         ]
 
         runner, results = run_plan(tmp_path, stages, CLIContext(instructions="hi"))
 
+        assert results["rescue"].success
         assert not results["after"].success
         assert "bad" in results["after"].error
 
     def test_partial_dependencies_runs_with_surviving_outputs(self, tmp_path, fake_models):
         fake_models.flaky.failures_left = 10
         stages = [
-            {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
             {"name": "good", "summary": "s", "model": "echo", "prompt": "CLI",
              "produces": "Good Analysis"},
+            {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
             {"name": "synthesis", "summary": "s", "model": "echo",
              "depends_on": ["bad", "good"], "partial_dependencies": True,
              "prompt": "inline:Synthesise."},
@@ -320,16 +329,36 @@ class TestFailureHandling:
         assert "## Good Analysis" in results["synthesis"].text
         assert "bad" not in results["synthesis"].text.lower().replace("flaky-ok", "")
 
-    def test_independent_stages_still_run_after_a_failure(self, tmp_path, fake_models):
+    def test_sequential_failure_aborts_before_later_stages_spend_money(
+        self, tmp_path, fake_models
+    ):
         fake_models.flaky.failures_left = 10
         stages = [
             {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
             {"name": "independent", "summary": "s", "model": "echo", "prompt": "CLI"},
         ]
+        plan = load_plan(write_plan(tmp_path, stages))
+        runner = PlanRunner(plan, CLIContext(instructions="hi"), retry_delay=0)
+
+        with pytest.raises(PlanError, match="bad"):
+            runner.run()
+
+        assert fake_models.echo.prompts == []
+
+    def test_sequential_failure_continues_when_the_next_stage_tolerates_it(
+        self, tmp_path, fake_models
+    ):
+        fake_models.flaky.failures_left = 10
+        stages = [
+            {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
+            {"name": "rescue", "summary": "s", "model": "echo", "prompt": "CLI",
+             "depends_on": ["bad"], "partial_dependencies": True},
+        ]
 
         runner, results = run_plan(tmp_path, stages, CLIContext(instructions="hi"))
 
-        assert results["independent"].success
+        assert not results["bad"].success
+        assert results["rescue"].success
 
 
 class TestResponses:
