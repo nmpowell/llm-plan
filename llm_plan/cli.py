@@ -28,6 +28,9 @@ def plan():
 @click.argument("prompt", required=False)
 @click.option("instructions", "-i", "--instruction", multiple=True,
               help="Instruction text, before the prompt argument (repeatable)")
+@click.option("headed_instructions", "--ci", "--context-instruction", multiple=True,
+              type=(str, str),
+              help="Headed instructions: --ci TEXT HEADING (repeatable)")
 @click.option("fragments", "-f", "--fragment", multiple=True,
               help="Seed context: file path, URL, alias, hash or prefix:argument")
 @click.option("context_files", "--cf", "--context-file", multiple=True,
@@ -51,9 +54,9 @@ def plan():
               type=click.Path(dir_okay=False, writable=True, allow_dash=False),
               help="Path to a log database to use instead of logs.db")
 @click.option("quiet", "-q", "--quiet", is_flag=True, help="Suppress progress output")
-def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
-         model_id, options, plan_args, do_explain, retries, no_log, force_log,
-         database, quiet):
+def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
+         context_files, attachments, model_id, options, plan_args, do_explain,
+         retries, no_log, force_log, database, quiet):
     """Execute a plan by alias or path.
 
     The final (leaf) stage text prints to stdout; progress goes to stderr.
@@ -77,6 +80,7 @@ def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
     db = open_logs_db(database)
     context = CLIContext(
         instructions=_read_prompt(prompt, instructions),
+        instruction_sections=[(heading, text) for text, heading in headed_instructions],
         files=[FileRef(path=Path(path), label=label) for path, label in context_files],
         model=model_id,
         options=dict(options),
@@ -99,9 +103,9 @@ def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
     try:
         runner.run()
     except PlanError as exc:
-        _emit_tracking(logged, quiet)
+        _emit_tracking(runner.run_id, logged, quiet)
         raise click.ClickException(str(exc))
-    _emit_tracking(logged, quiet)
+    _emit_tracking(runner.run_id, logged, quiet)
 
     leaves = runner.leaf_stages()
     succeeded = [runner.results[name] for name in leaves if runner.results[name].success]
@@ -118,12 +122,13 @@ def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
         raise click.ClickException(f"Plan '{loaded.name or plan_ref}' failed - {details}")
 
 
-def _emit_tracking(logged: list, quiet: bool) -> None:
-    """Report stage → response-id mappings so a run is findable in llm logs."""
+def _emit_tracking(run_id: str, logged: list, quiet: bool) -> None:
+    """Report the run and its stage → response-id mappings for llm logs."""
     if not logged or quiet:
         return
+    click.echo(f"Run {run_id}:", err=True)
     for stage_name, response_id in logged:
-        click.echo(f"[{stage_name}] response {response_id}", err=True)
+        click.echo(f"  [{stage_name}] response {response_id}", err=True)
     click.echo(
         f"Logged {len(logged)} response(s); view with: llm logs -n {len(logged)}",
         err=True,

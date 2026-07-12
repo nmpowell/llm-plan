@@ -193,11 +193,14 @@ def parse_prompt_list(
     cli_instructions: str,
     completed_text: dict[str, str],
     base_dir: Path | None = None,
+    cli_instruction_sections: list[tuple[str, str]] | None = None,
 ) -> PromptSpec:
     """Parse a stage's prompt spec (scalar or list) into a PromptSpec.
 
     ``completed_text`` maps finished-stage names to their response text, for
-    ``chain:`` items. Called at stage-execution time.
+    ``chain:`` items. ``cli_instruction_sections`` are (heading, text) pairs
+    from the command line, included wherever CLI instructions are requested.
+    Called at stage-execution time.
     """
     if not prompt:
         return PromptSpec()
@@ -236,8 +239,10 @@ def parse_prompt_list(
                 requires_cli_content = True
             elif value == "files":
                 wants_cli_files = True
-            if include_instructions and cli_instructions:
-                sections.append((label, cli_instructions))
+            if include_instructions:
+                sections.extend(cli_instruction_sections or [])
+                if cli_instructions:
+                    sections.append((label, cli_instructions))
 
         elif ptype == PromptType.FILE:
             spec_files.append(FileRef(path=Path(value), label=label))

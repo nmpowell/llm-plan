@@ -87,6 +87,7 @@ class CLIContext:
     """
 
     instructions: str = ""
+    instruction_sections: list = field(default_factory=list)  # list[(heading, text)]
     fragments: list = field(default_factory=list)
     files: list = field(default_factory=list)  # list[FileRef]
     attachments: list = field(default_factory=list)
@@ -96,7 +97,13 @@ class CLIContext:
 
     @property
     def has_content(self) -> bool:
-        return bool(self.instructions or self.fragments or self.files or self.attachments)
+        return bool(
+            self.instructions
+            or self.instruction_sections
+            or self.fragments
+            or self.files
+            or self.attachments
+        )
 
 
 class PlanRunner:
@@ -489,7 +496,12 @@ class PlanRunner:
 
     def _prepare_llm(self, stage: Stage, index: int, deps: list[str], failed: set[str]):
         spec = parse_prompt_list(
-            stage.prompt, stage.name, self.cli.instructions, self._text, self.plan.base_dir
+            stage.prompt,
+            stage.name,
+            self.cli.instructions,
+            self._text,
+            self.plan.base_dir,
+            cli_instruction_sections=self.cli.instruction_sections,
         )
 
         wants_cli_files = self._wants_cli_files(stage, index, deps, prompt_wants_files=spec.wants_cli_files)

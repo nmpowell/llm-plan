@@ -187,6 +187,21 @@ class TestPromptComposition:
         assert "## Original Question" in results["solo"].text
         assert "why?" in results["solo"].text
 
+    def test_headed_instruction_sections_render_with_their_headings(self, tmp_path):
+        stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
+        cli = CLIContext(
+            instructions="the main question",
+            instruction_sections=[("Focus Areas", "look at concurrency")],
+        )
+
+        runner, results = run_plan(tmp_path, stages, cli)
+
+        text = results["solo"].text
+        assert "## Focus Areas" in text
+        assert "look at concurrency" in text
+        assert "the main question" in text
+        assert text.index("look at concurrency") < text.index("the main question")
+
 
 class TestGoldenComposition:
     def test_composed_prompt_matches_the_legacy_shape_exactly(self, tmp_path, fake_models):

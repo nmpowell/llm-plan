@@ -91,6 +91,18 @@ class TestPlanRun:
             "ECHO[first instruction\n\nsecond instruction\n\nand the argument]\n"
         )
 
+    def test_headed_instructions_via_ci_flag(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke(
+            "plan", "run", str(plan), "the question",
+            "--ci", "look at concurrency", "Focus Areas",
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert "## Focus Areas" in result.stdout
+        assert "look at concurrency" in result.stdout
+
     def test_labelled_context_files_become_fenced_sections(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
         v1 = tmp_path / "v1.md"
@@ -261,6 +273,16 @@ class TestLogging:
         assert "[a] response" in result.stderr
         assert "[b] response" in result.stderr
         assert "llm logs -n 2" in result.stderr
+
+    def test_tracking_lines_carry_the_plan_run_id(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke("plan", "run", str(plan), "hi")
+
+        run_lines = [line for line in result.stderr.splitlines() if "Run " in line]
+        assert run_lines, result.stderr
+        run_id = run_lines[0].split("Run ")[1].split(":")[0]
+        assert len(run_id) == 12
 
     def test_no_log_prints_no_tracking_lines(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
