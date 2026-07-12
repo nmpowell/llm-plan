@@ -23,7 +23,7 @@ import pydantic
 from . import script_stage
 from .dag import SEED, leaf_stages, resolve_dependencies, topological_order, validate_plan
 from .models import Plan, PlanError, Stage, StageResult
-from .parser import parse_plan, parse_prompt_list, prompt_has_cli
+from .parser import parse_plan, parse_prompt_list, prompt_has_cli, prompt_wants_cli_files
 
 DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY = 5.0
@@ -272,10 +272,21 @@ class PlanRunner:
     # -- stage execution ------------------------------------------------------
 
     def _run_stage(self, stage: Stage, index: int, deps: list[str], failed: set[str]):
-        """Execute one stage; returns (StageResult, llm response or None)."""
-        if stage.type == "python_script":
-            return self._run_script_stage(stage, deps, failed), None
-        return self._run_llm_stage(stage, index, deps, failed)
+        """Execute one stage; returns (StageResult, llm response or None).
+
+        Runs on worker threads in parallel mode, so it must never raise:
+        anything unexpected becomes a failed StageResult.
+        """
+        try:
+            if stage.type == "python_script":
+                return self._run_script_stage(stage, deps, failed), None
+            return self._run_llm_stage(stage, index, deps, failed)
+        except Exception as exc:
+            return StageResult(
+                name=stage.name,
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+            ), None
 
     def _run_llm_stage(self, stage: Stage, index: int, deps: list[str], failed: set[str]):
         start = time.monotonic()
@@ -391,7 +402,10 @@ class PlanRunner:
                 error += f"\n{process.stderr.strip()[-2000:]}"
             return failure(error)
 
-        manifest = script_stage.parse_manifest(process.stdout)
+        try:
+            manifest = script_stage.parse_manifest(process.stdout)
+        except PlanError as exc:
+            return failure(str(exc))
         if manifest is not None:
             files = script_stage.manifest_output_paths(manifest)
         else:
@@ -411,7 +425,7 @@ class PlanRunner:
 
         try:
             text = files[0].read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return failure(f"could not read script output {files[0]}: {exc}")
 
         return StageResult(
@@ -446,7 +460,10 @@ class PlanRunner:
 
         paths.extend(ref.path for ref in stage.resolved_files)
 
-        if self._wants_cli_files(stage, index, deps, prompt_wants_files=False):
+        wants = self._wants_cli_files(
+            stage, index, deps, prompt_wants_files=prompt_wants_cli_files(stage.prompt)
+        )
+        if wants:
             paths.extend(ref.path for ref in self.cli.files)
             for position, fragment in enumerate(self.cli.fragments, 1):
                 source = getattr(fragment, "source", None)

@@ -79,7 +79,11 @@ def substitute_runtime(value: str, runtime: dict) -> str:
 
 
 def parse_manifest(stdout: str) -> dict | None:
-    """Parse a JSON manifest from script stdout; None for the bare-paths form."""
+    """Parse a JSON manifest from script stdout; None for the bare-paths form.
+
+    A JSON object with an ``outputs`` key is treated as a manifest and must be
+    well-formed: ``outputs`` is a list of path strings or {path, ...} mappings.
+    """
     text = stdout.strip()
     if not text.startswith("{"):
         return None
@@ -89,6 +93,22 @@ def parse_manifest(stdout: str) -> dict | None:
         return None
     if not isinstance(data, dict) or "outputs" not in data:
         return None
+
+    outputs = data["outputs"]
+    if not isinstance(outputs, list):
+        raise PlanError(
+            f"Invalid script manifest: 'outputs' must be a list, "
+            f"not {type(outputs).__name__}"
+        )
+    for spec in outputs:
+        if isinstance(spec, str):
+            continue
+        if isinstance(spec, dict) and isinstance(spec.get("path"), str):
+            continue
+        raise PlanError(
+            f"Invalid script manifest output entry {spec!r}: expected a path "
+            f"string or a mapping with a 'path' string"
+        )
     return data
 
 

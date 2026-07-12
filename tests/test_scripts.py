@@ -1,6 +1,7 @@
 import json
 import textwrap
 
+import pytest
 import yaml
 
 from llm_plan.models import PlanError
@@ -116,6 +117,32 @@ class TestScriptExecution:
         assert not results["worker"].success
         assert "timeout" in results["worker"].error.lower()
 
+    @pytest.mark.parametrize("stdout_line", [
+        '{"outputs": null}',
+        '{"outputs": {"path": "x"}}',
+        '{"outputs": [123]}',
+    ])
+    def test_malformed_manifests_fail_the_stage_cleanly(self, tmp_path, stdout_line):
+        body = f"print('{stdout_line}')"
+
+        runner, results = run_plan(tmp_path, [script_stage(tmp_path, body)])
+
+        assert not results["worker"].success
+        assert "manifest" in results["worker"].error.lower()
+
+    def test_undecodable_output_file_fails_the_stage_cleanly(self, tmp_path):
+        body = """
+        import os
+        out = os.path.join(os.environ["LLM_PLAN_OUTPUT_DIR"], "binary.bin")
+        open(out, "wb").write(b"\\xff\\xfe\\x00\\x01")
+        print(out)
+        """
+
+        runner, results = run_plan(tmp_path, [script_stage(tmp_path, body)])
+
+        assert not results["worker"].success
+        assert "binary.bin" in results["worker"].error
+
 
 class TestScriptInputs:
     def test_env_plan_args_and_runtime_vars_reach_the_script(self, tmp_path):
@@ -187,6 +214,23 @@ class TestScriptInputs:
         record = json.loads(results["worker"].text)
         assert record["argv"] == [str(seed)]
         assert record["inputs"] == ["seed body"]
+
+    @pytest.mark.parametrize("prompt, receives", [
+        ("CLI", True),
+        ("CLI:all", True),
+        ("CLI:files", True),
+        ("CLI:instructions", False),
+    ])
+    def test_script_cli_prompt_forms_control_seed_file_routing(
+        self, tmp_path, prompt, receives
+    ):
+        stage = script_stage(tmp_path, RECORDER_SCRIPT, prompt=prompt)
+        cli = CLIContext(instructions="hi", fragments=["seed fragment text"])
+
+        runner, results = run_plan(tmp_path, [stage], cli)
+
+        record = json.loads(results["worker"].text)
+        assert (record["inputs"] == ["seed fragment text"]) is receives
 
     def test_seed_dependent_script_gets_pathless_fragments_materialised(self, tmp_path):
         stages = [

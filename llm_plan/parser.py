@@ -175,6 +175,18 @@ def prompt_has_cli(prompt: str | list | None) -> bool:
     return False
 
 
+def prompt_wants_cli_files(prompt: str | list | None) -> bool:
+    """True if any CLI token in the prompt asks for the CLI seed files."""
+    if not prompt:
+        return False
+    items = prompt if isinstance(prompt, list) else [prompt]
+    for item in items:
+        text = item.get("prompt", "") if isinstance(item, dict) else item
+        if isinstance(text, str) and text.upper() in ("CLI", "CLI:FILES", "CLI:ALL"):
+            return True
+    return False
+
+
 def parse_prompt_list(
     prompt: str | list | None,
     stage_name: str,
