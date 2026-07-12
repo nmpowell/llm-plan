@@ -6,9 +6,8 @@ readme = "README.md"
 authors = [{name = "Nick Powell"}]
 license = "Apache-2.0"
 requires-python = ">=3.10"
-classifiers = []
 dependencies = [
-    "llm>=0.26",
+    "llm>=0.31",
     "click",
     "click-default-group",
     "pyyaml",
