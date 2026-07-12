@@ -27,24 +27,21 @@ class _InstructionOrderCommand(click.Command):
     """Record the command-line order of -i and --ci occurrences.
 
     Click hands each multiple= option's values over as one tuple, losing how
-    -i and --ci interleaved; their relative order changes the composed prompt,
-    so capture it from the raw arguments before normal parsing.
+    -i and --ci interleaved; their relative order changes the composed prompt.
+    Click's own parser reports parameter occurrences in order, so run it once
+    on a copy of the arguments to capture that order, then parse normally.
     """
 
     def parse_args(self, ctx, args):
-        order = []
-        skip = 0
-        for token in args:
-            if skip:
-                skip -= 1
-                continue
-            if token in ("-i", "--instruction") or token.startswith("--instruction="):
-                order.append("plain")
-                skip = 0 if "=" in token else 1
-            elif token in ("--ci", "--context-instruction"):
-                order.append("headed")
-                skip = 2
-        ctx.meta["instruction_order"] = order
+        try:
+            _, _, param_order = self.make_parser(ctx).parse_args(args=list(args))
+        except click.UsageError:
+            param_order = []  # super() re-raises this with full context
+        ctx.meta["instruction_order"] = [
+            "plain" if param.name == "instructions" else "headed"
+            for param in param_order
+            if param.name in ("instructions", "headed_instructions")
+        ]
         return super().parse_args(ctx, args)
 
 
@@ -164,21 +161,21 @@ def _emit_tracking(run_id: str, logged: list, quiet: bool) -> None:
 def _ordered_instruction_parts(
     order: list, plain: tuple, headed: tuple
 ) -> list[tuple[str | None, str]]:
-    """Interleave -i and --ci values back into their command-line order."""
-    if order.count("plain") == len(plain) and order.count("headed") == len(headed):
-        plain_values = iter(plain)
-        headed_values = iter(headed)
-        parts: list[tuple[str | None, str]] = []
-        for kind in order:
-            if kind == "plain":
-                parts.append((None, next(plain_values)))
-            else:
-                text, heading = next(headed_values)
-                parts.append((heading, text))
-        return parts
-    # The raw-argument scan disagreed with click's parse (unusual quoting):
-    # keep every value, at the cost of -i/--ci interleaving.
-    return [(None, text) for text in plain] + [(heading, text) for text, heading in headed]
+    """Interleave -i and --ci values back into their command-line order.
+
+    ``order`` comes from the same click parser that produced the values, so
+    the counts always agree.
+    """
+    plain_values = iter(plain)
+    headed_values = iter(headed)
+    parts: list[tuple[str | None, str]] = []
+    for kind in order:
+        if kind == "plain":
+            parts.append((None, next(plain_values)))
+        else:
+            text, heading = next(headed_values)
+            parts.append((heading, text))
+    return parts
 
 
 def _read_prompt(argument: str | None) -> str:

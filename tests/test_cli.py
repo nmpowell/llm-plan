@@ -1,3 +1,4 @@
+import pytest
 import sqlite_utils
 import yaml
 from click.testing import CliRunner
@@ -124,6 +125,24 @@ class TestPlanRun:
             < text.index("second headed")
             < text.index("third plain")
         )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            ["--ci=headed text", "The Heading", "-i", "plain text"],
+            ["--ci", "headed text", "The Heading", "-iplain text"],
+            ["--ci", "headed text", "The Heading", "-i", "plain text",
+             "--plan-arg", "--ci"],
+        ],
+        ids=["equals-form", "attached-short-form", "flag-like-option-value"],
+    )
+    def test_click_option_forms_preserve_instruction_order(self, tmp_path, arguments):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke("plan", "run", str(plan), *arguments)
+
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.index("headed text") < result.stdout.index("plain text")
 
     def test_labelled_context_files_become_fenced_sections(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
