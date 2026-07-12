@@ -7,7 +7,11 @@ callback (the CLI uses it to log to llm's logs.db) on the coordinating thread.
 
 from __future__ import annotations
 
+import os
 import shlex
+import subprocess
+import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field, replace
@@ -23,6 +27,7 @@ from .parser import parse_plan, parse_prompt_list, prompt_has_cli
 
 DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY = 5.0
+DEFAULT_SCRIPT_TIMEOUT = 3600
 SECTION_SEPARATOR = "\n\n---\n\n"
 
 
@@ -115,6 +120,8 @@ class PlanRunner:
         self._text: dict[str, str] = {}
         self._files: dict[str, list[Path]] = {}
         self._manifests: dict[str, dict] = {}
+        self._scratch_dir: Path | None = None
+        self._scratch_lock = threading.Lock()
 
     def run(self) -> list[StageResult]:
         """Execute every stage; results in listed-stage order."""
@@ -306,11 +313,122 @@ class PlanRunner:
         ), None
 
     def _run_script_stage(self, stage: Stage, deps: list[str], failed: set[str]) -> StageResult:
+        start = time.monotonic()
+
+        def failure(error: str) -> StageResult:
+            return StageResult(
+                name=stage.name,
+                success=False,
+                duration=time.monotonic() - start,
+                error=error,
+            )
+
+        scratch = self._scratch()
+        runtime = {
+            "cli": {"instructions": self.cli.instructions, "run_id": self.run_id},
+            "run": {"output_dir": str(scratch), "stage_name": stage.name},
+        }
+        try:
+            plan_args = [
+                script_stage.substitute_runtime(str(a), runtime) for a in self.cli.plan_args
+            ]
+            args = [
+                script_stage.substitute_runtime(str(a), runtime) for a in stage.script_args
+            ]
+        except PlanError as exc:
+            return failure(str(exc))
+
+        input_files = self._script_input_files(stage, deps, failed, scratch)
+        command = [stage.python, str(stage.resolved_script)]
+        command += plan_args + args + [str(path) for path in input_files]
+
+        env = {
+            **os.environ,
+            script_stage.ENV_INSTRUCTIONS: self.cli.instructions,
+            script_stage.ENV_OUTPUT_DIR: str(scratch),
+            script_stage.ENV_RUN_ID: self.run_id,
+            script_stage.ENV_STAGE_NAME: stage.name,
+            **{str(key): str(value) for key, value in stage.env.items()},
+        }
+        timeout = stage.timeout or DEFAULT_SCRIPT_TIMEOUT
+
+        try:
+            process = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return failure(f"script timeout: exceeded {timeout}s")
+        except OSError as exc:
+            return failure(f"could not run script: {exc}")
+
+        if process.returncode != 0:
+            error = f"script exited with code {process.returncode}"
+            if process.stderr:
+                error += f"\n{process.stderr.strip()[-2000:]}"
+            return failure(error)
+
+        manifest = script_stage.parse_manifest(process.stdout)
+        if manifest is not None:
+            files = script_stage.manifest_output_paths(manifest)
+        else:
+            files = [
+                Path(line.strip())
+                for line in process.stdout.splitlines()
+                if line.strip()
+            ]
+        if not files:
+            return failure(
+                "script produced no output paths on stdout "
+                "(print one path per line, or a JSON manifest)"
+            )
+        missing = [path for path in files if not path.is_file()]
+        if missing:
+            return failure(f"script output file does not exist: {missing[0]}")
+
+        try:
+            text = files[0].read_text(encoding="utf-8")
+        except OSError as exc:
+            return failure(f"could not read script output {files[0]}: {exc}")
+
         return StageResult(
             name=stage.name,
-            success=False,
-            error="python_script stages are not implemented yet",
+            success=True,
+            duration=time.monotonic() - start,
+            text=text,
+            files=files,
+            manifest=manifest,
         )
+
+    def _script_input_files(
+        self, stage: Stage, deps: list[str], failed: set[str], scratch: Path
+    ) -> list[Path]:
+        """Dependency outputs as file paths; LLM text is materialised to disk."""
+        paths: list[Path] = []
+        for dep in deps:
+            if dep == SEED or dep in failed:
+                continue
+            if dep in self._files:
+                paths.extend(self._files[dep])
+            elif dep in self._text:
+                target = scratch / f"{dep}.md"
+                target.write_text(self._text[dep], encoding="utf-8")
+                paths.append(target)
+        return paths
+
+    def _scratch(self) -> Path:
+        """A per-run scratch directory for script outputs (kept for inspection)."""
+        with self._scratch_lock:
+            if self._scratch_dir is None:
+                self._scratch_dir = Path(
+                    tempfile.mkdtemp(prefix=f"llm-plan-{self.run_id}-")
+                )
+                self.progress(f"  scratch directory: {self._scratch_dir}")
+            return self._scratch_dir
 
     # -- prompt preparation ---------------------------------------------------
 
