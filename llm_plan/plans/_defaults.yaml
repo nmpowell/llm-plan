@@ -1,0 +1,21 @@
+# Shared definitions for the bundled plans.
+#
+# Plans extend this file (`extends: "_defaults.yaml"`) and reference values
+# as ${models.opus}, ${prompts.synthesise}, etc.
+#
+# Model values are passed straight to llm's model resolution, so they may be
+# model IDs, plugin aliases, or aliases you set with `llm aliases set`.
+# The defaults below need the llm-anthropic and llm-gemini plugins installed
+# (gpt-5.5 ships with llm's OpenAI support); override any of them by copying
+# this file and the plan into your own plans directory (`llm plan path`).
+
+models:
+  opus: "anthropic/claude-opus-4-8"
+  sonnet: "anthropic/claude-sonnet-4-6"
+  haiku: "anthropic/claude-haiku-4-5-20251001"
+  gemini: "gemini/gemini-3.1-pro-preview"
+  gemini_flash: "gemini/gemini-3.5-flash"
+  gpt5: "gpt-5.5-2026-04-23"
+
+prompts:
+  synthesise: "prompts/synthesise.md"
