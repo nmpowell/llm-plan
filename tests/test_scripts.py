@@ -245,6 +245,15 @@ class TestScriptInputs:
         record = json.loads(results["worker"].text)
         assert record["inputs"] == ["fragment text with no path"]
 
+    def test_headed_instructions_reach_scripts(self, tmp_path):
+        stage = script_stage(tmp_path, RECORDER_SCRIPT)
+        cli = CLIContext(instruction_parts=[("Focus Areas", "headed body")])
+
+        runner, results = run_plan(tmp_path, [stage], cli)
+
+        record = json.loads(results["worker"].text)
+        assert record["instructions"] == "## Focus Areas\n\nheaded body"
+
     def test_unknown_runtime_variable_in_plan_args_fails_the_stage(self, tmp_path):
         stage = script_stage(tmp_path, RECORDER_SCRIPT)
         cli = CLIContext(plan_args=["${cli.bogus}"])

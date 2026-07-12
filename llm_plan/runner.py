@@ -87,7 +87,7 @@ class CLIContext:
     """
 
     instructions: str = ""
-    instruction_sections: list = field(default_factory=list)  # list[(heading, text)]
+    instruction_parts: list = field(default_factory=list)  # ordered [(heading|None, text)]
     fragments: list = field(default_factory=list)
     files: list = field(default_factory=list)  # list[FileRef]
     attachments: list = field(default_factory=list)
@@ -96,13 +96,25 @@ class CLIContext:
     plan_args: list = field(default_factory=list)
 
     @property
+    def all_instruction_parts(self) -> list[tuple[str | None, str]]:
+        """-i/--ci parts in command-line order, then the prompt argument/stdin."""
+        parts = list(self.instruction_parts)
+        if self.instructions:
+            parts.append((None, self.instructions))
+        return parts
+
+    @property
+    def instructions_text(self) -> str:
+        """The full instruction text, headings included - what scripts see."""
+        return "\n\n".join(
+            f"## {heading}\n\n{text}" if heading else text
+            for heading, text in self.all_instruction_parts
+        )
+
+    @property
     def has_content(self) -> bool:
         return bool(
-            self.instructions
-            or self.instruction_sections
-            or self.fragments
-            or self.files
-            or self.attachments
+            self.all_instruction_parts or self.fragments or self.files or self.attachments
         )
 
 
@@ -361,7 +373,7 @@ class PlanRunner:
 
         scratch = self._scratch()
         runtime = {
-            "cli": {"instructions": self.cli.instructions, "run_id": self.run_id},
+            "cli": {"instructions": self.cli.instructions_text, "run_id": self.run_id},
             "run": {"output_dir": str(scratch), "stage_name": stage.name},
         }
         try:
@@ -381,7 +393,7 @@ class PlanRunner:
 
         env = {
             **os.environ,
-            script_stage.ENV_INSTRUCTIONS: self.cli.instructions,
+            script_stage.ENV_INSTRUCTIONS: self.cli.instructions_text,
             script_stage.ENV_OUTPUT_DIR: str(scratch),
             script_stage.ENV_RUN_ID: self.run_id,
             script_stage.ENV_STAGE_NAME: stage.name,
@@ -498,10 +510,9 @@ class PlanRunner:
         spec = parse_prompt_list(
             stage.prompt,
             stage.name,
-            self.cli.instructions,
+            self.cli.all_instruction_parts,
             self._text,
             self.plan.base_dir,
-            cli_instruction_sections=self.cli.instruction_sections,
         )
 
         wants_cli_files = self._wants_cli_files(stage, index, deps, prompt_wants_files=spec.wants_cli_files)
@@ -550,27 +561,24 @@ class PlanRunner:
                 (ref.label or "MAIN INSTRUCTIONS", _read(ref.path, stage.name))
             )
 
-        labelled_parts = [(label, text) for label, text in spec.sections if label]
-        plain_parts = [text for label, text in spec.sections if not label and text.strip()]
-
         rendered = [
             _render_section(label, body, fenced=True)
             for label, body in fenced_sections
             if body.strip()
         ]
-        rendered += [
-            _render_section(label, text, fenced=False)
-            for label, text in labelled_parts
-            if text.strip()
-        ]
-        instructions_text = "\n\n".join(part.strip() for part in plain_parts)
-        if instructions_text and rendered:
-            rendered.append(
-                _render_section("Additional Instructions", instructions_text, fenced=False)
-            )
-            instructions_text = ""
+        spec_parts = [(label, text) for label, text in spec.sections if text.strip()]
 
-        prompt_text = "\n".join(rendered) if rendered else instructions_text
+        if not rendered and not any(label for label, _ in spec_parts):
+            # The whole prompt is plain instruction text: keep it raw.
+            prompt_text = "\n\n".join(text.strip() for _, text in spec_parts)
+        else:
+            # Each part keeps its listed position; label-less parts sit under
+            # their own "Additional Instructions" heading, as llm_cli's -i did.
+            rendered += [
+                _render_section(label or "Additional Instructions", text, fenced=False)
+                for label, text in spec_parts
+            ]
+            prompt_text = "\n".join(rendered)
 
         fragments = list(self.cli.fragments) if wants_cli_files else []
         attachments = [

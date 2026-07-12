@@ -227,11 +227,11 @@ Script stages write real files into a per-run scratch directory (its path is
 printed on stderr and kept after the run).
 
 Migrating from a `--from-plan`-style CLI: `--from-plan X` → `run X`;
-`-i "text" ["Heading"]` → `-i "text"` (headings gone); `-f path label` →
-`--cf path label` (`-f` now means llm fragments); `--plan-args ...` →
-repeated `--plan-arg`; per-model default options (e.g. a large `max_tokens`
-for Opus) are gone — set them per stage in `options:` or with
-`llm models options set`.
+`-i "text"` is unchanged and `-i "text" "Heading"` → `--ci "text" "Heading"`;
+`-f path label` → `--cf path label` (`-f` now means llm fragments);
+`--plan-args ...` → repeated `--plan-arg`; per-model default options (e.g. a
+large `max_tokens` for Opus) are gone — set them per stage in `options:` or
+with `llm models options set`.
 
 ## Development
 

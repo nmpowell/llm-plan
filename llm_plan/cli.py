@@ -23,7 +23,32 @@ def plan():
     """
 
 
-@plan.command(name="run")
+class _InstructionOrderCommand(click.Command):
+    """Record the command-line order of -i and --ci occurrences.
+
+    Click hands each multiple= option's values over as one tuple, losing how
+    -i and --ci interleaved; their relative order changes the composed prompt,
+    so capture it from the raw arguments before normal parsing.
+    """
+
+    def parse_args(self, ctx, args):
+        order = []
+        skip = 0
+        for token in args:
+            if skip:
+                skip -= 1
+                continue
+            if token in ("-i", "--instruction") or token.startswith("--instruction="):
+                order.append("plain")
+                skip = 0 if "=" in token else 1
+            elif token in ("--ci", "--context-instruction"):
+                order.append("headed")
+                skip = 2
+        ctx.meta["instruction_order"] = order
+        return super().parse_args(ctx, args)
+
+
+@plan.command(name="run", cls=_InstructionOrderCommand)
 @click.argument("plan_ref")
 @click.argument("prompt", required=False)
 @click.option("instructions", "-i", "--instruction", multiple=True,
@@ -78,9 +103,10 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
         return
 
     db = open_logs_db(database)
+    order = click.get_current_context().meta.get("instruction_order", [])
     context = CLIContext(
-        instructions=_read_prompt(prompt, instructions),
-        instruction_sections=[(heading, text) for text, heading in headed_instructions],
+        instructions=_read_prompt(prompt),
+        instruction_parts=_ordered_instruction_parts(order, instructions, headed_instructions),
         files=[FileRef(path=Path(path), label=label) for path, label in context_files],
         model=model_id,
         options=dict(options),
@@ -135,17 +161,36 @@ def _emit_tracking(run_id: str, logged: list, quiet: bool) -> None:
     )
 
 
-def _read_prompt(argument: str | None, instructions: tuple[str, ...] = ()) -> str:
-    """Compose -i entries, then piped stdin + the prompt argument (like llm)."""
-    tail_parts = []
+def _ordered_instruction_parts(
+    order: list, plain: tuple, headed: tuple
+) -> list[tuple[str | None, str]]:
+    """Interleave -i and --ci values back into their command-line order."""
+    if order.count("plain") == len(plain) and order.count("headed") == len(headed):
+        plain_values = iter(plain)
+        headed_values = iter(headed)
+        parts: list[tuple[str | None, str]] = []
+        for kind in order:
+            if kind == "plain":
+                parts.append((None, next(plain_values)))
+            else:
+                text, heading = next(headed_values)
+                parts.append((heading, text))
+        return parts
+    # The raw-argument scan disagreed with click's parse (unusual quoting):
+    # keep every value, at the cost of -i/--ci interleaving.
+    return [(None, text) for text in plain] + [(heading, text) for text, heading in headed]
+
+
+def _read_prompt(argument: str | None) -> str:
+    """Combine piped stdin and the prompt argument, stdin first (like llm)."""
+    parts = []
     if not sys.stdin.isatty():
         piped = sys.stdin.read().strip()
         if piped:
-            tail_parts.append(piped)
+            parts.append(piped)
     if argument:
-        tail_parts.append(argument)
-    parts = [*instructions, " ".join(tail_parts)]
-    return "\n\n".join(part for part in parts if part)
+        parts.append(argument)
+    return " ".join(parts)
 
 
 def _resolve_seed_inputs(db, fragments, attachments, context: CLIContext) -> None:

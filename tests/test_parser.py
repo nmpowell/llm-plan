@@ -143,7 +143,7 @@ class TestParsePromptList:
         ]
 
         spec = parse_prompt_list(
-            prompt, "stage", cli_instructions="the question", completed_text={}, base_dir=tmp_path
+            prompt, "stage", [(None, "the question")], completed_text={}, base_dir=tmp_path
         )
 
         assert [(f.label, f.path.name) for f in spec.prompt_files] == [("Guidelines", "guide.md")]
@@ -158,7 +158,7 @@ class TestParsePromptList:
         spec = parse_prompt_list(
             [{"prompt": "chain:analyst", "label": "Analysis"}],
             "stage",
-            cli_instructions="",
+            [],
             completed_text={"analyst": "analyst says hi"},
         )
 
@@ -169,12 +169,12 @@ class TestParsePromptList:
             parse_prompt_list(
                 "chain:analyst",
                 "stage",
-                cli_instructions="",
+                [],
                 completed_text={"reviewer": "text"},
             )
 
     def test_plain_cli_wants_files_and_requires_content(self):
-        spec = parse_prompt_list("CLI", "stage", cli_instructions="", completed_text={})
+        spec = parse_prompt_list("CLI", "stage", [], completed_text={})
 
         assert spec.wants_cli_files is True
         assert spec.requires_cli_content is True
@@ -182,7 +182,7 @@ class TestParsePromptList:
 
     def test_cli_instructions_variant_does_not_want_files(self):
         spec = parse_prompt_list(
-            "CLI:instructions", "stage", cli_instructions="q", completed_text={}
+            "CLI:instructions", "stage", [(None, "q")], completed_text={}
         )
 
         assert spec.wants_cli_files is False
@@ -191,7 +191,7 @@ class TestParsePromptList:
     def test_yaml_inline_mapping_trap_gets_a_helpful_error(self):
         with pytest.raises(PlanError, match='"inline:'):
             parse_prompt_list(
-                [{"inline": "some text"}], "stage", cli_instructions="", completed_text={}
+                [{"inline": "some text"}], "stage", [], completed_text={}
             )
 
 
@@ -234,6 +234,22 @@ class TestParsePlan:
         )
 
         with pytest.raises(PlanError, match="max_workers"):
+            parse_plan(plan_file)
+
+    @pytest.mark.parametrize("bad_config", ["many", [1], 3, False])
+    def test_non_mapping_parallel_config_is_an_error(self, tmp_path, bad_config):
+        plan_file = write_yaml(
+            tmp_path / "plan.yaml", minimal_plan(parallel_config=bad_config)
+        )
+
+        with pytest.raises(PlanError, match="parallel_config"):
+            parse_plan(plan_file)
+
+    def test_non_utf8_plan_file_is_a_plan_error(self, tmp_path):
+        plan_file = tmp_path / "plan.yaml"
+        plan_file.write_bytes(b"name: \xff\xfe broken")
+
+        with pytest.raises(PlanError, match="plan.yaml"):
             parse_plan(plan_file)
 
     def test_malformed_yaml_is_a_plan_error(self, tmp_path):

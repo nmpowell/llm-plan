@@ -50,6 +50,8 @@ def _load_yaml_mapping(path: Path) -> dict:
             data = yaml.safe_load(f)
     except yaml.YAMLError as exc:
         raise PlanError(f"Invalid YAML in {path}: {exc}") from exc
+    except UnicodeError as exc:
+        raise PlanError(f"{path} is not valid UTF-8: {exc}") from exc
     except OSError as exc:
         raise PlanError(f"Could not read {path}: {exc}") from exc
     if data is None:
@@ -190,17 +192,17 @@ def prompt_wants_cli_files(prompt: str | list | None) -> bool:
 def parse_prompt_list(
     prompt: str | list | None,
     stage_name: str,
-    cli_instructions: str,
+    cli_instruction_parts: list[tuple[str | None, str]],
     completed_text: dict[str, str],
     base_dir: Path | None = None,
-    cli_instruction_sections: list[tuple[str, str]] | None = None,
 ) -> PromptSpec:
     """Parse a stage's prompt spec (scalar or list) into a PromptSpec.
 
     ``completed_text`` maps finished-stage names to their response text, for
-    ``chain:`` items. ``cli_instruction_sections`` are (heading, text) pairs
-    from the command line, included wherever CLI instructions are requested.
-    Called at stage-execution time.
+    ``chain:`` items. ``cli_instruction_parts`` are ordered (heading, text)
+    pairs from the command line, included wherever CLI instructions are
+    requested; a part's heading (or, failing that, the prompt item's label)
+    becomes its section heading. Called at stage-execution time.
     """
     if not prompt:
         return PromptSpec()
@@ -237,12 +239,11 @@ def parse_prompt_list(
             if value in ("", "all"):
                 wants_cli_files = True
                 requires_cli_content = True
-            elif value == "files":
-                wants_cli_files = True
             if include_instructions:
-                sections.extend(cli_instruction_sections or [])
-                if cli_instructions:
-                    sections.append((label, cli_instructions))
+                for heading, text in cli_instruction_parts:
+                    sections.append((heading if heading else label, text))
+            if value == "files":
+                wants_cli_files = True
 
         elif ptype == PromptType.FILE:
             spec_files.append(FileRef(path=Path(value), label=label))
@@ -294,7 +295,13 @@ def parse_plan(plan_file: Path) -> Plan:
         for number, stage_data in enumerate(stages_data, 1)
     ]
 
-    parallel_config = data.get("parallel_config") or {}
+    parallel_config = data.get("parallel_config")
+    if parallel_config is None:
+        parallel_config = {}
+    if not isinstance(parallel_config, dict):
+        raise PlanError(
+            f"parallel_config must be a mapping, not {parallel_config!r}"
+        )
     max_workers = parallel_config.get("max_workers", 1)
     if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
         raise PlanError(

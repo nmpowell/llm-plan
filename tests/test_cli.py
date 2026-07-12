@@ -106,6 +106,25 @@ class TestPlanRun:
         assert "## Focus Areas" in result.stdout
         assert "look at concurrency" in result.stdout
 
+    def test_mixed_instructions_keep_their_command_line_order(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke(
+            "plan", "run", str(plan),
+            "-i", "first plain",
+            "--ci", "second headed", "Second Heading",
+            "-i", "third plain",
+        )
+
+        assert result.exit_code == 0, result.stderr
+        text = result.stdout
+        assert (
+            text.index("first plain")
+            < text.index("## Second Heading")
+            < text.index("second headed")
+            < text.index("third plain")
+        )
+
     def test_labelled_context_files_become_fenced_sections(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
         v1 = tmp_path / "v1.md"

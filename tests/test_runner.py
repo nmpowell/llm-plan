@@ -187,11 +187,11 @@ class TestPromptComposition:
         assert "## Original Question" in results["solo"].text
         assert "why?" in results["solo"].text
 
-    def test_headed_instruction_sections_render_with_their_headings(self, tmp_path):
+    def test_headed_instruction_parts_render_with_their_headings(self, tmp_path):
         stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
         cli = CLIContext(
             instructions="the main question",
-            instruction_sections=[("Focus Areas", "look at concurrency")],
+            instruction_parts=[("Focus Areas", "look at concurrency")],
         )
 
         runner, results = run_plan(tmp_path, stages, cli)
