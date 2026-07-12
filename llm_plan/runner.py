@@ -7,6 +7,7 @@ callback (the CLI uses it to log to llm's logs.db) on the coordinating thread.
 
 from __future__ import annotations
 
+import shlex
 import time
 import uuid
 from dataclasses import dataclass, field, replace
@@ -16,7 +17,7 @@ import llm
 import pydantic
 
 from . import script_stage
-from .dag import SEED, leaf_stages, resolve_dependencies, validate_plan
+from .dag import SEED, leaf_stages, resolve_dependencies, topological_order, validate_plan
 from .models import Plan, PlanError, Stage, StageResult
 from .parser import parse_plan, parse_prompt_list, prompt_has_cli
 
@@ -31,6 +32,46 @@ def load_plan(path) -> Plan:
     validate_plan(plan)
     script_stage.validate_runtime_vars(plan.stages)
     return plan
+
+
+def explain(plan: Plan, plan_args: list[str] | None = None) -> str:
+    """A human-readable preview of the plan's DAG; executes nothing."""
+    plan_args = list(plan_args or [])
+    by_name = {stage.name: stage for stage in plan.stages}
+    position = {stage.name: index for index, stage in enumerate(plan.stages)}
+    lines = [f"Plan: {plan.name or 'Unnamed'}"]
+    if plan.summary:
+        lines.append(f"  {plan.summary}")
+    lines.append(f"  Stages: {len(plan.stages)} (execution order)")
+    lines.append("")
+    for number, name in enumerate(topological_order(plan.stages), 1):
+        stage = by_name[name]
+        deps = resolve_dependencies(stage, position[name], plan.stages)
+        lines.append(f"{number}. {name}  [{stage.type}]")
+        lines.append(f"     {stage.summary}")
+        if stage.type == "python_script":
+            lines.append(f"     script: {stage.script}")
+        else:
+            lines.append(f"     model: {stage.model}")
+        if deps:
+            labelled = []
+            for dep in deps:
+                produces = getattr(by_name.get(dep), "produces", None)
+                labelled.append(f"{dep} ({produces})" if produces else dep)
+            lines.append(f"     inputs: {', '.join(labelled)}")
+        else:
+            lines.append("     inputs: CLI (prompt / -f / -a)")
+        if stage.produces:
+            lines.append(f"     produces: {stage.produces}")
+        if stage.type == "python_script":
+            command = [stage.python, str(stage.resolved_script or stage.script)]
+            command += plan_args + [str(a) for a in stage.script_args]
+            preview = shlex.join(command)
+            if deps:
+                preview += f"  <+ {len(deps)} dependency output file(s)>"
+            lines.append(f"     command: {preview}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 @dataclass
