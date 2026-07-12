@@ -1,3 +1,5 @@
+import threading
+import time
 from types import SimpleNamespace
 from typing import Optional
 
@@ -54,6 +56,42 @@ class FlakyModel(llm.Model):
         yield "FLAKY-OK"
 
 
+class PairModel(llm.Model):
+    """Succeeds only when two executions overlap in time."""
+
+    model_id = "pair"
+    can_stream = True
+
+    def __init__(self):
+        self.barrier = threading.Barrier(2)
+
+    def execute(self, prompt, stream, response, conversation):
+        try:
+            self.barrier.wait(timeout=5)
+        except threading.BrokenBarrierError:
+            raise RuntimeError("execution did not overlap with a second call")
+        yield "PAIR-OK"
+
+
+class TimingModel(llm.Model):
+    """Records an (identifier, start, end) interval per execution."""
+
+    model_id = "timing"
+    can_stream = True
+
+    def __init__(self):
+        self.intervals = []
+        self._lock = threading.Lock()
+
+    def execute(self, prompt, stream, response, conversation):
+        start = time.monotonic()
+        time.sleep(0.05)
+        end = time.monotonic()
+        with self._lock:
+            self.intervals.append((prompt.prompt, start, end))
+        yield "TIMED"
+
+
 @pytest.fixture(autouse=True)
 def fake_models():
     """Register throwaway models with llm's plugin manager for each test."""
@@ -61,6 +99,8 @@ def fake_models():
         echo=EchoModel(),
         other=EchoModel(model_id="other"),
         flaky=FlakyModel(),
+        pair=PairModel(),
+        timing=TimingModel(),
     )
 
     class TestModelsPlugin:
@@ -71,6 +111,8 @@ def fake_models():
             register(models.echo)
             register(models.other)
             register(models.flaky)
+            register(models.pair)
+            register(models.timing)
 
     pm.register(TestModelsPlugin(), name="llm-plan-test-models")
     try:

@@ -1,0 +1,141 @@
+import yaml
+
+from llm_plan.runner import CLIContext, PlanRunner, load_plan
+
+
+def parallel_plan(tmp_path, stages, max_workers=4):
+    data = {
+        "name": "test",
+        "summary": "a parallel test plan",
+        "parallel_config": {"max_workers": max_workers},
+        "stages": stages,
+    }
+    plan_file = tmp_path / "plan.yaml"
+    plan_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return PlanRunner(
+        load_plan(plan_file), CLIContext(instructions="go"), retry_delay=0, retries=0
+    )
+
+
+def by_name(results):
+    return {r.name: r for r in results}
+
+
+class TestParallelExecution:
+    def test_independent_stages_run_concurrently(self, tmp_path):
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "left", "summary": "s", "model": "pair", "prompt": "CLI"},
+                {"name": "right", "summary": "s", "model": "pair", "prompt": "CLI"},
+            ],
+        )
+
+        results = by_name(runner.run())
+
+        assert results["left"].success and results["right"].success
+
+    def test_diamond_joins_both_branch_outputs(self, tmp_path):
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "root", "summary": "s", "model": "echo", "prompt": "CLI",
+                 "produces": "Root"},
+                {"name": "left", "summary": "s", "model": "echo", "depends_on": ["root"],
+                 "prompt": "inline:left work", "produces": "Left View"},
+                {"name": "right", "summary": "s", "model": "echo", "depends_on": ["root"],
+                 "prompt": "inline:right work", "produces": "Right View"},
+                {"name": "join", "summary": "s", "model": "echo",
+                 "depends_on": ["left", "right"], "prompt": "inline:combine"},
+            ],
+        )
+
+        results = by_name(runner.run())
+
+        assert all(r.success for r in results.values())
+        assert "## Left View" in results["join"].text
+        assert "## Right View" in results["join"].text
+
+    def test_results_are_returned_in_listed_stage_order(self, tmp_path):
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "b_stage", "summary": "s", "model": "echo", "prompt": "CLI"},
+                {"name": "a_stage", "summary": "s", "model": "echo", "prompt": "CLI"},
+            ],
+        )
+
+        results = runner.run()
+
+        assert [r.name for r in results] == ["b_stage", "a_stage"]
+
+
+class TestExclusive:
+    def test_exclusive_stage_never_overlaps_other_stages(self, tmp_path, fake_models):
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "one", "summary": "s", "model": "timing",
+                 "prompt": "inline:one", "depends_on": ["seed"]},
+                {"name": "two", "summary": "s", "model": "timing",
+                 "prompt": "inline:two", "depends_on": ["seed"]},
+                {"name": "alone", "summary": "s", "model": "timing",
+                 "prompt": "inline:alone", "depends_on": ["seed"], "exclusive": True},
+                {"name": "after", "summary": "s", "model": "timing",
+                 "prompt": "inline:after", "depends_on": ["seed"]},
+            ],
+        )
+
+        results = by_name(runner.run())
+
+        assert all(r.success for r in results.values())
+        intervals = {text: (start, end) for text, start, end in fake_models.timing.intervals}
+        assert len(intervals) == 4
+        alone_start, alone_end = intervals.pop("alone")
+        for text, (start, end) in intervals.items():
+            assert end <= alone_start or start >= alone_end, (
+                f"stage '{text}' ({start:.3f}-{end:.3f}) overlapped the exclusive "
+                f"stage ({alone_start:.3f}-{alone_end:.3f})"
+            )
+
+
+class TestParallelFailures:
+    def test_failed_dependency_skips_intolerant_dependents(self, tmp_path, fake_models):
+        fake_models.flaky.failures_left = 99
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
+                {"name": "child", "summary": "s", "model": "echo",
+                 "depends_on": ["bad"], "prompt": "inline:child"},
+                {"name": "grandchild", "summary": "s", "model": "echo",
+                 "depends_on": ["child"], "prompt": "inline:grandchild"},
+                {"name": "independent", "summary": "s", "model": "echo", "prompt": "CLI"},
+            ],
+        )
+
+        results = by_name(runner.run())
+
+        assert not results["bad"].success
+        assert "skipped" in results["child"].error
+        assert "skipped" in results["grandchild"].error
+        assert results["independent"].success
+
+    def test_partial_dependencies_joins_surviving_branches(self, tmp_path, fake_models):
+        fake_models.flaky.failures_left = 99
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
+                {"name": "good", "summary": "s", "model": "echo", "prompt": "CLI",
+                 "produces": "Good Analysis"},
+                {"name": "join", "summary": "s", "model": "echo",
+                 "depends_on": ["bad", "good"], "partial_dependencies": True,
+                 "prompt": "inline:combine"},
+            ],
+        )
+
+        results = by_name(runner.run())
+
+        assert results["join"].success
+        assert "## Good Analysis" in results["join"].text

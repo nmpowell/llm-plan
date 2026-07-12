@@ -118,14 +118,18 @@ class PlanRunner:
 
     def run(self) -> list[StageResult]:
         """Execute every stage; results in listed-stage order."""
-        return self._run_sequential()
+        if self.plan.max_workers > 1 and len(self.plan.stages) > 1:
+            self._run_parallel()
+        else:
+            self._run_sequential()
+        return [self.results[stage.name] for stage in self.plan.stages]
 
     def leaf_stages(self) -> list[str]:
         return leaf_stages(self.plan.stages)
 
     # -- scheduling -----------------------------------------------------------
 
-    def _run_sequential(self) -> list[StageResult]:
+    def _run_sequential(self) -> None:
         failed: set[str] = set()
         total = len(self.plan.stages)
         for index, stage in enumerate(self.plan.stages):
@@ -135,7 +139,75 @@ class PlanRunner:
             self.progress(f"Stage {index + 1}/{total}: {stage.name} - {stage.summary}")
             result, response = self._run_stage(stage, index, deps, failed)
             self._finish(stage, result, response, failed)
-        return [self.results[stage.name] for stage in self.plan.stages]
+
+    def _run_parallel(self) -> None:
+        """DAG scheduling over a thread pool.
+
+        Workers only execute stages; results are collected, chained and
+        logged on this coordinating thread. An exclusive stage waits for
+        in-flight stages to drain and runs entirely alone.
+        """
+        from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+
+        llm.get_models()  # force llm's lazy plugin registry before threads race
+
+        stages = self.plan.stages
+        position = {stage.name: index for index, stage in enumerate(stages)}
+        deps_of = {
+            stage.name: resolve_dependencies(stage, index, stages)
+            for index, stage in enumerate(stages)
+        }
+        dependents: dict[str, list[Stage]] = {stage.name: [] for stage in stages}
+        in_degree: dict[str, int] = {}
+        for stage in stages:
+            real_deps = [d for d in deps_of[stage.name] if d != SEED]
+            in_degree[stage.name] = len(real_deps)
+            for dep in real_deps:
+                dependents[dep].append(stage)
+
+        failed: set[str] = set()
+        ready = [stage for stage in stages if in_degree[stage.name] == 0]
+        running: dict[Future, Stage] = {}
+        total = len(stages)
+
+        def release(stage: Stage) -> None:
+            for dependent in dependents[stage.name]:
+                in_degree[dependent.name] -= 1
+                if in_degree[dependent.name] == 0:
+                    ready.append(dependent)
+            ready.sort(key=lambda s: position[s.name])
+
+        with ThreadPoolExecutor(max_workers=self.plan.max_workers) as executor:
+            while ready or running:
+                while ready:
+                    if running and any(s.exclusive for s in running.values()):
+                        break
+                    if ready[0].exclusive and running:
+                        break  # drain in-flight stages before an exclusive one
+                    stage = ready.pop(0)
+                    deps = deps_of[stage.name]
+                    if self._skip_for_failed_deps(stage, deps, failed):
+                        release(stage)
+                        continue
+                    self.progress(
+                        f"Stage {position[stage.name] + 1}/{total}: {stage.name} "
+                        f"- {stage.summary}"
+                    )
+                    future = executor.submit(
+                        self._run_stage, stage, position[stage.name], deps, failed
+                    )
+                    running[future] = stage
+                    if stage.exclusive:
+                        break
+
+                if not running:
+                    continue
+                done, _ = wait(list(running), return_when=FIRST_COMPLETED)
+                for future in done:
+                    stage = running.pop(future)
+                    result, response = future.result()
+                    self._finish(stage, result, response, failed)
+                    release(stage)
 
     def _skip_for_failed_deps(self, stage: Stage, deps: list[str], failed: set[str]) -> bool:
         failed_deps = [d for d in deps if d in failed]
