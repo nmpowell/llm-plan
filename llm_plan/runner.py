@@ -28,7 +28,6 @@ from .parser import parse_plan, parse_prompt_list, prompt_has_cli
 DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY = 5.0
 DEFAULT_SCRIPT_TIMEOUT = 3600
-SECTION_SEPARATOR = "\n\n---\n\n"
 
 
 def load_plan(path) -> Plan:
@@ -456,9 +455,13 @@ class PlanRunner:
                 f"-a/--attachment."
             )
 
-        sections: list[tuple[str | None, str]] = []
+        # Composition mirrors llm_cli's PromptBuilder: file-backed sections are
+        # code-fenced under "## <label>" headings with "---" separators; plain
+        # instruction text lands under "Additional Instructions" when other
+        # content exists, and stays raw when it is the whole prompt.
+        fenced_sections: list[tuple[str, str]] = []
         for ref in stage.resolved_files:
-            sections.append((ref.label or ref.path.name, _read(ref.path, stage.name)))
+            fenced_sections.append((ref.label or ref.path.name, _read(ref.path, stage.name)))
 
         by_name = {s.name: s for s in self.plan.stages}
         for dep in deps:
@@ -473,23 +476,39 @@ class PlanRunner:
                     file_label = script_stage.manifest_label(
                         self._manifests.get(dep), path
                     ) or fallback
-                    sections.append((file_label, _read(path, stage.name)))
+                    fenced_sections.append((file_label, _read(path, stage.name)))
             elif dep in self._text:
-                sections.append((label, self._text[dep]))
+                fenced_sections.append((label, self._text[dep]))
 
         prompt_files = list(spec.prompt_files)
         if stage.prompt_label and prompt_files:
             prompt_files[0] = replace(prompt_files[0], label=stage.prompt_label)
         for ref in prompt_files:
-            sections.append((ref.label or "MAIN INSTRUCTIONS", _read(ref.path, stage.name)))
+            fenced_sections.append(
+                (ref.label or "MAIN INSTRUCTIONS", _read(ref.path, stage.name))
+            )
 
-        sections.extend(spec.sections)
+        labelled_parts = [(label, text) for label, text in spec.sections if label]
+        plain_parts = [text for label, text in spec.sections if not label and text.strip()]
 
-        prompt_text = SECTION_SEPARATOR.join(
-            f"## {label}\n\n{text.strip()}" if label else text.strip()
-            for label, text in sections
-            if text and text.strip()
-        )
+        rendered = [
+            _render_section(label, body, fenced=True)
+            for label, body in fenced_sections
+            if body.strip()
+        ]
+        rendered += [
+            _render_section(label, text, fenced=False)
+            for label, text in labelled_parts
+            if text.strip()
+        ]
+        instructions_text = "\n\n".join(part.strip() for part in plain_parts)
+        if instructions_text and rendered:
+            rendered.append(
+                _render_section("Additional Instructions", instructions_text, fenced=False)
+            )
+            instructions_text = ""
+
+        prompt_text = "\n".join(rendered) if rendered else instructions_text
 
         fragments = list(self.cli.fragments) if wants_cli_files else []
         attachments = [
@@ -542,6 +561,12 @@ class PlanRunner:
                     f"'{model.model_id}': {exc}"
                 ) from exc
         return merged
+
+
+def _render_section(label: str, body: str, *, fenced: bool) -> str:
+    if fenced:
+        return f"---\n\n## {label}\n\n```\n{body.strip()}\n```\n"
+    return f"---\n\n## {label}\n\n{body.strip()}\n"
 
 
 def _read(path: Path, stage_name: str) -> str:

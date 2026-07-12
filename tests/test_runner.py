@@ -170,6 +170,46 @@ class TestPromptComposition:
         assert "why?" in results["solo"].text
 
 
+class TestGoldenComposition:
+    def test_composed_prompt_matches_the_legacy_shape_exactly(self, tmp_path, fake_models):
+        (tmp_path / "ctx.md").write_text("context body\n", encoding="utf-8")
+        (tmp_path / "guide.md").write_text("guide body\n", encoding="utf-8")
+        stages = [
+            {"name": "analyst", "summary": "s", "model": "echo", "prompt": "CLI",
+             "produces": "Analysis"},
+            {"name": "synthesis", "summary": "s", "model": "echo",
+             "depends_on": ["analyst"],
+             "files": [{"path": "ctx.md", "label": "Context"}],
+             "prompt": [
+                 {"prompt": "CLI:instructions", "label": "Original Question"},
+                 {"prompt": "guide.md", "label": "Guidelines"},
+                 "inline:Also consider tone.",
+             ]},
+        ]
+
+        run_plan(tmp_path, stages, CLIContext(instructions="the question"))
+
+        expected = (
+            "---\n\n## Context\n\n```\ncontext body\n```\n"
+            "\n"
+            "---\n\n## Analysis\n\n```\nECHO[the question]\n```\n"
+            "\n"
+            "---\n\n## Guidelines\n\n```\nguide body\n```\n"
+            "\n"
+            "---\n\n## Original Question\n\nthe question\n"
+            "\n"
+            "---\n\n## Additional Instructions\n\nAlso consider tone.\n"
+        )
+        assert fake_models.echo.prompts[-1].prompt == expected
+
+    def test_a_lone_cli_prompt_stays_raw(self, tmp_path, fake_models):
+        stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
+
+        run_plan(tmp_path, stages, CLIContext(instructions="just the question"))
+
+        assert fake_models.echo.prompts[0].prompt == "just the question"
+
+
 class TestCliContextRouting:
     def test_fragments_reach_cli_stages_but_not_downstream_stages(self, tmp_path, fake_models):
         stages = [
