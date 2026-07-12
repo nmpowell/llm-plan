@@ -47,6 +47,24 @@ class TestSingleStage:
 
         assert fake_models.echo.stream_flags == [True]
 
+    def test_non_streaming_models_are_called_without_streaming(self, tmp_path):
+        stages = [{"name": "solo", "summary": "s", "model": "nostream", "prompt": "CLI"}]
+
+        runner, results = run_plan(
+            tmp_path, stages, CLIContext(instructions="hi")
+        )
+
+        assert results["solo"].success, results["solo"].error
+        assert results["solo"].text == "NOSTREAM-OK"
+
+    def test_negative_retries_are_rejected_at_construction(self, tmp_path):
+        plan = load_plan(write_plan(
+            tmp_path, [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
+        ))
+
+        with pytest.raises(PlanError, match="retries"):
+            PlanRunner(plan, CLIContext(), retries=-1)
+
     def test_plain_cli_stage_with_no_cli_content_fails_helpfully(self, tmp_path):
         runner, results = run_plan(
             tmp_path,

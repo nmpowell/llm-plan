@@ -227,6 +227,35 @@ class TestParsePlan:
 
         assert parse_plan(plan_file).max_workers == 7
 
+    @pytest.mark.parametrize("bad_value", [0, -2, True, 2.9, "many"])
+    def test_invalid_max_workers_is_an_error(self, tmp_path, bad_value):
+        plan_file = write_yaml(
+            tmp_path / "plan.yaml", minimal_plan(parallel_config={"max_workers": bad_value})
+        )
+
+        with pytest.raises(PlanError, match="max_workers"):
+            parse_plan(plan_file)
+
+    def test_malformed_yaml_is_a_plan_error(self, tmp_path):
+        plan_file = tmp_path / "plan.yaml"
+        plan_file.write_text("stages: [unclosed", encoding="utf-8")
+
+        with pytest.raises(PlanError, match="plan.yaml"):
+            parse_plan(plan_file)
+
+    def test_non_mapping_document_is_a_plan_error(self, tmp_path):
+        plan_file = tmp_path / "plan.yaml"
+        plan_file.write_text("- just\n- a\n- list\n", encoding="utf-8")
+
+        with pytest.raises(PlanError, match="mapping"):
+            parse_plan(plan_file)
+
+    def test_non_mapping_stage_is_a_plan_error(self, tmp_path):
+        plan_file = write_yaml(tmp_path / "plan.yaml", minimal_plan(stages=["oops"]))
+
+        with pytest.raises(PlanError, match="[Ss]tage"):
+            parse_plan(plan_file)
+
     @pytest.mark.parametrize(
         "mutation, message",
         [

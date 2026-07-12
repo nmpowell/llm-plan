@@ -27,8 +27,7 @@ _VARIABLE_RE = re.compile(r"\$\{([^}]+)\}")
 
 def load_with_extends(plan_file: Path) -> dict:
     """Load a plan YAML, merging any ``extends:`` base file underneath it."""
-    with open(plan_file, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    data = _load_yaml_mapping(plan_file)
     if not data:
         return {}
 
@@ -38,11 +37,25 @@ def load_with_extends(plan_file: Path) -> dict:
             raise PlanError(
                 f"Extended file not found: {base_path} (referenced from {plan_file})"
             )
-        with open(base_path, encoding="utf-8") as f:
-            base = yaml.safe_load(f) or {}
+        base = _load_yaml_mapping(base_path)
         data = deep_merge(base, data)
         del data["extends"]
 
+    return data
+
+
+def _load_yaml_mapping(path: Path) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        raise PlanError(f"Invalid YAML in {path}: {exc}") from exc
+    except OSError as exc:
+        raise PlanError(f"Could not read {path}: {exc}") from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise PlanError(f"{path} must contain a YAML mapping, not {type(data).__name__}")
     return data
 
 
@@ -265,13 +278,19 @@ def parse_plan(plan_file: Path) -> Plan:
     ]
 
     parallel_config = data.get("parallel_config") or {}
+    max_workers = parallel_config.get("max_workers", 1)
+    if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+        raise PlanError(
+            f"parallel_config.max_workers must be a positive integer, "
+            f"not {max_workers!r}"
+        )
     return Plan(
         path=plan_file,
         stages=stages,
         name=data.get("name"),
         summary=data.get("summary"),
         version=str(data.get("version", "1.0")),
-        max_workers=int(parallel_config.get("max_workers", 1)),
+        max_workers=max_workers,
     )
 
 
@@ -280,6 +299,8 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         return PlanError(f"Stage {number}{name_suffix}: {message}")
 
     name_suffix = ""
+    if not isinstance(stage_data, dict):
+        raise error(f"must be a mapping, not {type(stage_data).__name__}")
     name = stage_data.get("name")
     if not name:
         raise error("'name' is required")

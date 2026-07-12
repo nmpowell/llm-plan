@@ -164,6 +164,24 @@ class TestPlanRun:
         assert result.exit_code != 0
         assert "no-such-plan" in result.stderr
 
+    def test_malformed_yaml_is_a_clean_error(self, tmp_path):
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("stages: [unclosed", encoding="utf-8")
+
+        result = invoke("plan", "run", str(bad), "hi")
+
+        assert result.exit_code == 1
+        assert "Error:" in result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_negative_retries_are_rejected(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke("plan", "run", str(plan), "hi", "--retries", "-1")
+
+        assert result.exit_code != 0
+        assert "retries" in result.stderr.lower()
+
 
 class TestBundledPlans:
     def test_synthesis_full_keeps_the_original_stage_structure(self):

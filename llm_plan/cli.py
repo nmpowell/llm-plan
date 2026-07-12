@@ -43,6 +43,7 @@ def plan():
 @click.option("do_explain", "--explain", is_flag=True,
               help="Print the plan's DAG and commands without executing")
 @click.option("--retries", default=DEFAULT_RETRIES, show_default=True,
+              type=click.IntRange(min=0),
               help="Retries per LLM stage after a failure")
 @click.option("no_log", "-n", "--no-log", is_flag=True, help="Don't log to the database")
 @click.option("force_log", "--log", is_flag=True, help="Log even if logging is off")

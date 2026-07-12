@@ -58,6 +58,18 @@ class FlakyModel(llm.Model):
         yield "FLAKY-OK"
 
 
+class NonStreamingModel(llm.Model):
+    """Rejects streamed execution, like models that declare can_stream=False."""
+
+    model_id = "nostream"
+    can_stream = False
+
+    def execute(self, prompt, stream, response, conversation):
+        if stream:
+            raise RuntimeError("non-stream model received stream=True")
+        return ["NOSTREAM-OK"]
+
+
 class PairModel(llm.Model):
     """Succeeds only when two executions overlap in time."""
 
@@ -101,6 +113,7 @@ def fake_models():
         echo=EchoModel(),
         other=EchoModel(model_id="other"),
         flaky=FlakyModel(),
+        nostream=NonStreamingModel(),
         pair=PairModel(),
         timing=TimingModel(),
     )
@@ -113,6 +126,7 @@ def fake_models():
             register(models.echo)
             register(models.other)
             register(models.flaky)
+            register(models.nostream)
             register(models.pair)
             register(models.timing)
 

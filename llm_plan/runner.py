@@ -113,6 +113,8 @@ class PlanRunner:
         retries: int = DEFAULT_RETRIES,
         retry_delay: float = DEFAULT_RETRY_DELAY,
     ):
+        if retries < 0:
+            raise PlanError(f"retries must be zero or more, not {retries}")
         self.plan = plan
         self.cli = cli or CLIContext()
         self.run_id = run_id or uuid.uuid4().hex[:12]
@@ -299,13 +301,14 @@ class PlanRunner:
                 time.sleep(self.retry_delay)
             try:
                 # Options go as **kwargs: llm 0.31 has no options= parameter,
-                # and 0.32 accepts both forms. Streaming stays on - Anthropic's
-                # SDK rejects non-streaming requests it deems long-running.
+                # and 0.32 accepts both forms. Stream when the model can -
+                # Anthropic's SDK rejects non-streaming requests it deems
+                # long-running - but never force it on can_stream=False models.
                 response = model.prompt(
                     prompt_text or None,
                     fragments=fragments or None,
                     attachments=attachments or None,
-                    stream=True,
+                    stream=bool(getattr(model, "can_stream", True)),
                     **options,
                 )
                 text = response.text()
