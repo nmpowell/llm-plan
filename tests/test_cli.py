@@ -166,6 +166,22 @@ class TestPlanRun:
 
 
 class TestBundledPlans:
+    def test_synthesis_full_keeps_the_original_stage_structure(self):
+        from llm_plan.runner import load_plan
+        from llm_plan.store import resolve_plan
+
+        plan = load_plan(resolve_plan("synthesis_full"))
+
+        stages = {stage.name: stage for stage in plan.stages}
+        assert [s.name for s in plan.stages] == [
+            "opus", "sonnet", "gemini_pro", "gpt5", "synthesis",
+        ]
+        assert stages["gemini_pro"].produces == "Gemini Pro Analysis"
+        assert stages["synthesis"].depends_on == ["opus", "sonnet", "gemini_pro", "gpt5"]
+        assert stages["synthesis"].partial_dependencies is True
+        assert stages["synthesis"].produces == "Final Synthesis"
+        assert plan.max_workers == 7
+
     def test_synthesis_full_runs_end_to_end_with_a_model_override(self, tmp_path):
         result = invoke("plan", "run", "synthesis_full", "the question", "-m", "echo")
 

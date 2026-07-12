@@ -6,6 +6,11 @@
 # Each analyst receives the CLI instructions (and any -f fragments); the
 # synthesis stage receives only the original question plus every analysis,
 # and still runs if some analysts fail (partial_dependencies).
+#
+# The stage layout matches the plan this package grew out of; the bundled
+# synthesis prompt (prompts/synthesise.md) is a compact general-purpose one.
+# To use your own, copy this plan and _defaults.yaml into `llm plan path`
+# (same-alias plans there shadow this bundled copy).
 extends: "_defaults.yaml"
 
 name: "synthesis_full"
@@ -28,11 +33,11 @@ stages:
     prompt: "CLI"
     produces: "Sonnet Analysis"
 
-  - name: "gemini"
+  - name: "gemini_pro"
     summary: "Gemini Pro analysis"
-    model: "${models.gemini}"
+    model: "${models.gemini_pro}"
     prompt: "CLI"
-    produces: "Gemini Analysis"
+    produces: "Gemini Pro Analysis"
 
   - name: "gpt5"
     summary: "GPT-5 analysis"
@@ -48,6 +53,6 @@ stages:
         label: "Original Question"
       - prompt: "${prompts.synthesise}"
         label: "Synthesis Instructions"
-    depends_on: [opus, sonnet, gemini, gpt5]
+    depends_on: [opus, sonnet, gemini_pro, gpt5]
     partial_dependencies: true
     produces: "Final Synthesis"
