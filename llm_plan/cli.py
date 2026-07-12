@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import click
 import llm
 from click_default_group import DefaultGroup
 
 from .logs import log_response, logging_enabled, open_logs_db
-from .models import PlanError
+from .models import FileRef, PlanError
 from .runner import CLIContext, DEFAULT_RETRIES, PlanRunner, explain, load_plan
 from .store import list_plans, resolve_plan, user_plan_dir
 
@@ -25,8 +26,13 @@ def plan():
 @plan.command(name="run")
 @click.argument("plan_ref")
 @click.argument("prompt", required=False)
+@click.option("instructions", "-i", "--instruction", multiple=True,
+              help="Instruction text, before the prompt argument (repeatable)")
 @click.option("fragments", "-f", "--fragment", multiple=True,
               help="Seed context: file path, URL, alias, hash or prefix:argument")
+@click.option("context_files", "--cf", "--context-file", multiple=True,
+              type=(click.Path(exists=True, dir_okay=False), str),
+              help="Labelled seed file: --cf PATH LABEL (repeatable)")
 @click.option("attachments", "-a", "--attachment", multiple=True,
               help="Seed attachment: file path or URL")
 @click.option("model_id", "-m", "--model", help="Override the model for every LLM stage")
@@ -44,8 +50,9 @@ def plan():
               type=click.Path(dir_okay=False, writable=True, allow_dash=False),
               help="Path to a log database to use instead of logs.db")
 @click.option("quiet", "-q", "--quiet", is_flag=True, help="Suppress progress output")
-def run_(plan_ref, prompt, fragments, attachments, model_id, options, plan_args,
-         do_explain, retries, no_log, force_log, database, quiet):
+def run_(plan_ref, prompt, instructions, fragments, context_files, attachments,
+         model_id, options, plan_args, do_explain, retries, no_log, force_log,
+         database, quiet):
     """Execute a plan by alias or path.
 
     The final (leaf) stage text prints to stdout; progress goes to stderr.
@@ -68,7 +75,8 @@ def run_(plan_ref, prompt, fragments, attachments, model_id, options, plan_args,
 
     db = open_logs_db(database)
     context = CLIContext(
-        instructions=_read_prompt(prompt),
+        instructions=_read_prompt(prompt, instructions),
+        files=[FileRef(path=Path(path), label=label) for path, label in context_files],
         model=model_id,
         options=dict(options),
         plan_args=list(plan_args),
@@ -103,16 +111,17 @@ def run_(plan_ref, prompt, fragments, attachments, model_id, options, plan_args,
         raise click.ClickException(f"Plan '{loaded.name or plan_ref}' failed - {details}")
 
 
-def _read_prompt(argument: str | None) -> str:
-    """Combine piped stdin and the prompt argument, stdin first (like llm)."""
-    parts = []
+def _read_prompt(argument: str | None, instructions: tuple[str, ...] = ()) -> str:
+    """Compose -i entries, then piped stdin + the prompt argument (like llm)."""
+    tail_parts = []
     if not sys.stdin.isatty():
         piped = sys.stdin.read().strip()
         if piped:
-            parts.append(piped)
+            tail_parts.append(piped)
     if argument:
-        parts.append(argument)
-    return " ".join(parts)
+        tail_parts.append(argument)
+    parts = [*instructions, " ".join(tail_parts)]
+    return "\n\n".join(part for part in parts if part)
 
 
 def _resolve_seed_inputs(db, fragments, attachments, context: CLIContext) -> None:

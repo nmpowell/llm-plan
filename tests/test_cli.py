@@ -78,6 +78,33 @@ class TestPlanRun:
         assert "seed file content" in result.stdout
         assert "question" in result.stdout
 
+    def test_repeatable_instructions_compose_in_order(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+
+        result = invoke(
+            "plan", "run", str(plan), "and the argument",
+            "-i", "first instruction", "-i", "second instruction",
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout == (
+            "ECHO[first instruction\n\nsecond instruction\n\nand the argument]\n"
+        )
+
+    def test_labelled_context_files_become_fenced_sections(self, tmp_path):
+        plan = write_plan(tmp_path, [cli_stage()])
+        v1 = tmp_path / "v1.md"
+        v1.write_text("first version", encoding="utf-8")
+
+        result = invoke(
+            "plan", "run", str(plan), "compare", "--cf", str(v1), "Version 1"
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert "## Version 1" in result.stdout
+        assert "```\nfirst version\n```" in result.stdout
+        assert "compare" in result.stdout
+
     def test_model_option_overrides_all_stages(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
 

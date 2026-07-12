@@ -80,10 +80,15 @@ def explain(plan: Plan, plan_args: list[str] | None = None) -> str:
 
 @dataclass
 class CLIContext:
-    """Seed input from the command line, routed to stages that ask for it."""
+    """Seed input from the command line, routed to stages that ask for it.
+
+    ``files`` holds labelled context files (--cf); ``fragments`` holds llm
+    fragments (-f). Both route to the same stages; files keep their labels.
+    """
 
     instructions: str = ""
     fragments: list = field(default_factory=list)
+    files: list = field(default_factory=list)  # list[FileRef]
     attachments: list = field(default_factory=list)
     model: str | None = None
     options: dict = field(default_factory=dict)
@@ -91,7 +96,7 @@ class CLIContext:
 
     @property
     def has_content(self) -> bool:
-        return bool(self.instructions or self.fragments or self.attachments)
+        return bool(self.instructions or self.fragments or self.files or self.attachments)
 
 
 class PlanRunner:
@@ -439,6 +444,7 @@ class PlanRunner:
         paths.extend(ref.path for ref in stage.resolved_files)
 
         if self._wants_cli_files(stage, index, deps, prompt_wants_files=False):
+            paths.extend(ref.path for ref in self.cli.files)
             for position, fragment in enumerate(self.cli.fragments, 1):
                 source = getattr(fragment, "source", None)
                 if source and Path(source).is_file():
@@ -481,6 +487,11 @@ class PlanRunner:
         fenced_sections: list[tuple[str, str]] = []
         for ref in stage.resolved_files:
             fenced_sections.append((ref.label or ref.path.name, _read(ref.path, stage.name)))
+        if wants_cli_files:
+            for ref in self.cli.files:
+                fenced_sections.append(
+                    (ref.label or ref.path.name, _read(ref.path, stage.name))
+                )
 
         by_name = {s.name: s for s in self.plan.stages}
         for dep in deps:
