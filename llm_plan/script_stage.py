@@ -1,0 +1,162 @@
+"""The ``python_script`` stage protocol, and helpers for script authors.
+
+A script stage's contract with the plan runner:
+
+* **Inputs**: the CLI instructions on ``$LLM_PLAN_INSTRUCTIONS`` (plus
+  ``$LLM_PLAN_OUTPUT_DIR`` / ``$LLM_PLAN_RUN_ID`` / ``$LLM_PLAN_STAGE_NAME``),
+  ``--plan-arg`` values and the stage's ``script_args``, then dependency
+  output files as trailing positional argv.
+* **Output**: printed to stdout - either one existing file path per line, or a
+  single JSON manifest ``{"outputs": [{"path": ..., "label": ...}, ...],
+  "metadata": {...}}``. Everything else (progress, logs) goes to stderr;
+  exit 0 on success.
+
+``${cli.*}``/``${run.*}`` tokens in ``script_args`` and ``--plan-arg`` values
+are substituted at execution time; see ``RUNTIME_VAR_SPEC``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+from .models import PlanError, Stage
+
+ENV_INSTRUCTIONS = "LLM_PLAN_INSTRUCTIONS"
+ENV_OUTPUT_DIR = "LLM_PLAN_OUTPUT_DIR"
+ENV_RUN_ID = "LLM_PLAN_RUN_ID"
+ENV_STAGE_NAME = "LLM_PLAN_STAGE_NAME"
+
+# Runtime variables available in script_args / --plan-arg values.
+RUNTIME_VAR_SPEC: dict[str, frozenset[str]] = {
+    "cli": frozenset({"instructions", "run_id"}),
+    "run": frozenset({"output_dir", "stage_name"}),
+}
+
+_RUNTIME_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def validate_runtime_vars(stages: list[Stage]) -> None:
+    """Reject unknown ``${...}`` tokens in script_args at load time.
+
+    Runs after the load-time variable pass, so the only tokens left are the
+    deferred runtime ones; this catches typos before any stage spends money.
+    """
+    valid = ", ".join(
+        f"{ns}.{key}" for ns, keys in RUNTIME_VAR_SPEC.items() for key in sorted(keys)
+    )
+    for stage in stages:
+        for arg in stage.script_args:
+            if not isinstance(arg, str):
+                continue
+            for token in _RUNTIME_VAR_RE.findall(arg):
+                parts = token.split(".")
+                allowed = RUNTIME_VAR_SPEC.get(parts[0])
+                if allowed is None or len(parts) != 2 or parts[1] not in allowed:
+                    raise PlanError(
+                        f"Stage '{stage.name}': unknown runtime variable "
+                        f"'${{{token}}}'. Valid runtime variables: {valid}"
+                    )
+
+
+def substitute_runtime(value: str, runtime: dict) -> str:
+    """Substitute runtime ``${...}`` tokens; unknown tokens are an error."""
+
+    def replace(match: re.Match) -> str:
+        token = match.group(1)
+        cursor: Any = runtime
+        for part in token.split("."):
+            if not isinstance(cursor, dict) or part not in cursor:
+                raise PlanError(f"Unknown runtime variable '${{{token}}}'")
+            cursor = cursor[part]
+        return str(cursor)
+
+    return _RUNTIME_VAR_RE.sub(replace, value)
+
+
+def parse_manifest(stdout: str) -> dict | None:
+    """Parse a JSON manifest from script stdout; None for the bare-paths form."""
+    text = stdout.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or "outputs" not in data:
+        return None
+    return data
+
+
+def manifest_output_paths(manifest: dict) -> list[Path]:
+    """Output file paths from a parsed manifest, in order."""
+    paths = []
+    for spec in manifest.get("outputs", []):
+        if isinstance(spec, dict) and spec.get("path"):
+            paths.append(Path(spec["path"]))
+        elif isinstance(spec, str):
+            paths.append(Path(spec))
+    return paths
+
+
+def manifest_label(manifest: dict | None, path: Path) -> str | None:
+    """The label a manifest assigns to ``path``, if any."""
+    if not manifest:
+        return None
+    for spec in manifest.get("outputs", []):
+        if isinstance(spec, dict) and spec.get("label"):
+            if Path(spec.get("path", "")) == Path(path):
+                return str(spec["label"])
+    return None
+
+
+# --- Helpers for script authors ---------------------------------------------
+
+
+def read_instructions() -> str:
+    """The CLI instructions forwarded by the plan runner, or ''."""
+    return os.environ.get(ENV_INSTRUCTIONS, "")
+
+
+def output_dir() -> Path | None:
+    """The run's scratch directory, if the plan runner forwarded one."""
+    value = os.environ.get(ENV_OUTPUT_DIR)
+    return Path(value) if value else None
+
+
+def run_id() -> str | None:
+    """The run id the plan runner forwarded, if any."""
+    return os.environ.get(ENV_RUN_ID)
+
+
+def emit_outputs(
+    outputs: list[Any], *, metadata: dict | None = None, manifest: bool = True, stream=None
+) -> None:
+    """Print produced output paths to stdout for the plan runner.
+
+    Each item is a path or a mapping with ``path`` and optional ``label``.
+    With ``manifest=True`` a single JSON manifest is printed; otherwise the
+    bare one-path-per-line form (labels and metadata are dropped).
+    """
+    out = stream or sys.stdout
+    specs = []
+    for item in outputs:
+        if isinstance(item, dict):
+            spec = {"path": str(item["path"])}
+            if item.get("label"):
+                spec["label"] = str(item["label"])
+            specs.append(spec)
+        else:
+            specs.append({"path": str(item)})
+    if manifest:
+        document: dict[str, Any] = {"outputs": specs}
+        if metadata:
+            document["metadata"] = metadata
+        print(json.dumps(document), file=out)
+    else:
+        for spec in specs:
+            print(spec["path"], file=out)
