@@ -292,9 +292,9 @@ class TestCliContextRouting:
 
         assert fake_models.echo.prompts[0].fragments == ["seed fragment text"]
 
-    def test_attachments_follow_the_same_routing(self, tmp_path, fake_models):
+    def test_attachments_follow_the_same_routing(self, tmp_path, fake_models, png_bytes):
         image = tmp_path / "img.png"
-        image.write_bytes(b"\x89PNG fake")
+        image.write_bytes(png_bytes)
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
             {"name": "second", "summary": "s", "model": "echo",

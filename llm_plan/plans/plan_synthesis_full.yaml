@@ -25,24 +25,28 @@ stages:
     summary: "Claude Opus analysis"
     model: "${models.opus}"
     prompt: "CLI"
+    prompt_label: "Instructions"
     produces: "Opus Analysis"
 
   - name: "sonnet"
     summary: "Claude Sonnet analysis"
     model: "${models.sonnet}"
     prompt: "CLI"
+    prompt_label: "Instructions"
     produces: "Sonnet Analysis"
 
   - name: "gemini_pro"
     summary: "Gemini Pro analysis"
     model: "${models.gemini_pro}"
     prompt: "CLI"
+    prompt_label: "Instructions"
     produces: "Gemini Pro Analysis"
 
   - name: "gpt5"
     summary: "GPT-5 analysis"
     model: "${models.gpt5}"
     prompt: "CLI"
+    prompt_label: "Instructions"
     produces: "GPT-5 Analysis"
 
   - name: "synthesis"

@@ -62,6 +62,8 @@ Options for `run`:
   `cat notes.md | llm plan review "focus on risks"` works like `llm prompt`.
 - `-i/--instruction TEXT` — repeatable instruction parts, composed before the
   positional prompt.
+- `--ci/--context-instruction TEXT HEADING` — instructions under a `## HEADING`
+  of their own (repeatable).
 - `-f/--fragment SOURCE` — seed context for stages that ask for CLI input: a
   file path, URL, fragment alias/hash, or plugin source like
   `github:owner/repo`. Resolved exactly like `llm prompt -f`.

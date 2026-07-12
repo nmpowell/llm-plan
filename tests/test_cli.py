@@ -16,6 +16,9 @@ def cli_stage(name="solo", model="echo", **kwargs):
     return {"name": name, "summary": f"{name} stage", "model": model, "prompt": "CLI", **kwargs}
 
 
+PINNED_SYNTHESISE_SHA256 = "181893a6ee40d17fc049991fdded2ae5926a4d0980114ed12f30e902bf0e453a"
+
+
 def invoke(*args, **kwargs):
     return CliRunner().invoke(cli, list(args), **kwargs)
 
@@ -207,10 +210,26 @@ class TestBundledPlans:
             "opus", "sonnet", "gemini_pro", "gpt5", "synthesis",
         ]
         assert stages["gemini_pro"].produces == "Gemini Pro Analysis"
+        assert all(
+            stages[name].prompt_label == "Instructions"
+            for name in ("opus", "sonnet", "gemini_pro", "gpt5")
+        )
         assert stages["synthesis"].depends_on == ["opus", "sonnet", "gemini_pro", "gpt5"]
         assert stages["synthesis"].partial_dependencies is True
         assert stages["synthesis"].produces == "Final Synthesis"
         assert plan.max_workers == 7
+
+    def test_the_bundled_synthesis_prompt_is_pinned(self):
+        # The bundled prompt is a compact generic synthesis prompt, NOT the
+        # personal one the source plan uses; changing it changes what the
+        # synthesis_full alias does, so any edit must be deliberate.
+        import hashlib
+
+        from llm_plan.store import BUNDLED_PLAN_DIR
+
+        content = (BUNDLED_PLAN_DIR / "prompts" / "synthesise.md").read_bytes()
+
+        assert hashlib.sha256(content).hexdigest() == PINNED_SYNTHESISE_SHA256
 
     def test_synthesis_full_runs_end_to_end_with_a_model_override(self, tmp_path):
         result = invoke("plan", "run", "synthesis_full", "the question", "-m", "echo")

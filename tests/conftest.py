@@ -1,3 +1,4 @@
+import base64
 import threading
 import time
 from types import SimpleNamespace
@@ -7,6 +8,17 @@ import llm
 import pytest
 from llm.plugins import pm
 from pydantic import Field
+
+# A real 1x1 PNG: attachment type detection must work on every llm version.
+PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+@pytest.fixture
+def png_bytes():
+    return PNG_1PX
 
 
 @pytest.fixture(autouse=True)
