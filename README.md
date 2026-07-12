@@ -60,9 +60,13 @@ Options for `run`:
 
 - `PROMPT` — the seed instructions. Piped stdin is prepended, so
   `cat notes.md | llm plan review "focus on risks"` works like `llm prompt`.
+- `-i/--instruction TEXT` — repeatable instruction parts, composed before the
+  positional prompt.
 - `-f/--fragment SOURCE` — seed context for stages that ask for CLI input: a
   file path, URL, fragment alias/hash, or plugin source like
   `github:owner/repo`. Resolved exactly like `llm prompt -f`.
+- `--cf/--context-file PATH LABEL` — a labelled seed file, included as a
+  fenced `## LABEL` section (repeatable).
 - `-a/--attachment PATH_OR_URL` — seed attachments (images etc.).
 - `-m/--model MODEL` — override the model for **every** LLM stage (handy for
   a cheap end-to-end check: `-m haiku-4.5`).
