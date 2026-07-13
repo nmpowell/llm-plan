@@ -1,3 +1,10 @@
+import os
+
+# Keep the suite hermetic: llm loads every installed entry-point plugin unless
+# told otherwise, and it reads this variable once at import time - so it must
+# be set before anything imports llm.
+os.environ.setdefault("LLM_LOAD_PLUGINS", "llm-plan")
+
 import base64
 import threading
 import time
