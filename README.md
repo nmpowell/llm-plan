@@ -250,6 +250,15 @@ pip install -e '.[test]'
 python -m pytest
 ```
 
+Or with [uv](https://docs.astral.sh/uv/):
+
+```bash
+cd llm-plan
+uv venv && source .venv/bin/activate
+uv pip install -e '.[test]'
+python -m pytest
+```
+
 The test suite uses fake in-process models — no network calls, no API keys.
 Tested against llm 0.31 and 0.32, on macOS and Linux (script-stage process
 management is POSIX-only; Windows is untested and unsupported).
