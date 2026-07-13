@@ -24,6 +24,15 @@ def invoke(*args, **kwargs):
     return CliRunner().invoke(cli, list(args), **kwargs)
 
 
+@pytest.fixture
+def logs_db(user_dir):
+    db = sqlite_utils.Database(str(user_dir / "logs.db"))
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 class TestPlanPath:
     def test_prints_the_user_plans_directory(self, user_dir):
         result = invoke("plan", "path")
@@ -305,26 +314,24 @@ class TestExplain:
 
 
 class TestLogging:
-    def test_responses_are_logged_to_llms_database(self, tmp_path, user_dir):
+    def test_responses_are_logged_to_llms_database(self, tmp_path, logs_db):
         plan = write_plan(tmp_path, [cli_stage("a"), cli_stage("b")])
 
         result = invoke("plan", "run", str(plan), "hi")
 
         assert result.exit_code == 0, result.stderr
-        db = sqlite_utils.Database(str(user_dir / "logs.db"))
-        rows = list(db["responses"].rows)
+        rows = list(logs_db["responses"].rows)
         assert len(rows) == 2
         assert {row["model"] for row in rows} == {"echo"}
         assert rows[0]["response"] == "ECHO[hi]"
 
-    def test_stderr_maps_each_stage_to_its_logged_response_id(self, tmp_path, user_dir):
+    def test_stderr_maps_each_stage_to_its_logged_response_id(self, tmp_path, logs_db):
         plan = write_plan(tmp_path, [cli_stage("a"), cli_stage("b")])
 
         result = invoke("plan", "run", str(plan), "hi")
 
-        db = sqlite_utils.Database(str(user_dir / "logs.db"))
         id_a, id_b = [
-            row[0] for row in db.execute("select id from responses order by rowid")
+            row[0] for row in logs_db.execute("select id from responses order by rowid")
         ]
         assert f"[a] response {id_a}" in result.stderr
         assert f"[b] response {id_b}" in result.stderr
@@ -348,28 +355,28 @@ class TestLogging:
         assert "response" not in result.stderr
         assert "llm logs" not in result.stderr
 
-    def test_no_log_skips_the_database(self, tmp_path, user_dir):
+    def test_no_log_skips_the_database(self, tmp_path, logs_db):
         plan = write_plan(tmp_path, [cli_stage()])
 
-        invoke("plan", "run", str(plan), "hi", "-n")
+        result = invoke("plan", "run", str(plan), "hi", "-n")
 
-        db = sqlite_utils.Database(str(user_dir / "logs.db"))
-        assert "responses" not in db.table_names() or db["responses"].count == 0
+        assert result.exit_code == 0, result.stderr
+        assert "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
 
-    def test_logs_off_sentinel_is_respected(self, tmp_path, user_dir):
+    def test_logs_off_sentinel_is_respected(self, tmp_path, user_dir, logs_db):
         (user_dir / "logs-off").touch()
         plan = write_plan(tmp_path, [cli_stage()])
 
-        invoke("plan", "run", str(plan), "hi")
+        result = invoke("plan", "run", str(plan), "hi")
 
-        db = sqlite_utils.Database(str(user_dir / "logs.db"))
-        assert "responses" not in db.table_names() or db["responses"].count == 0
+        assert result.exit_code == 0, result.stderr
+        assert "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
 
-    def test_log_flag_overrides_the_sentinel(self, tmp_path, user_dir):
+    def test_log_flag_overrides_the_sentinel(self, tmp_path, user_dir, logs_db):
         (user_dir / "logs-off").touch()
         plan = write_plan(tmp_path, [cli_stage()])
 
-        invoke("plan", "run", str(plan), "hi", "--log")
+        result = invoke("plan", "run", str(plan), "hi", "--log")
 
-        db = sqlite_utils.Database(str(user_dir / "logs.db"))
-        assert db["responses"].count == 1
+        assert result.exit_code == 0, result.stderr
+        assert logs_db["responses"].count == 1

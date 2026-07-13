@@ -100,35 +100,40 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
         return
 
     db = open_logs_db(database)
-    order = click.get_current_context().meta.get("instruction_order", [])
-    context = CLIContext(
-        instructions=_read_prompt(prompt),
-        instruction_parts=_ordered_instruction_parts(order, instructions, headed_instructions),
-        files=[FileRef(path=Path(path), label=label) for path, label in context_files],
-        model=model_id,
-        options=dict(options),
-        plan_args=list(plan_args),
-    )
-    _resolve_seed_inputs(db, fragments, attachments, context)
-
-    progress = None if quiet else (lambda message: click.echo(message, err=True))
-    logged: list[tuple[str, str]] = []
-    on_response = None
-    if logging_enabled(force_log=force_log, no_log=no_log):
-
-        def on_response(stage, response):
-            log_response(db, response)
-            logged.append((stage.name, response.id))
-
-    runner = PlanRunner(
-        loaded, context, on_response=on_response, progress=progress, retries=retries
-    )
     try:
-        runner.run()
-    except PlanError as exc:
+        order = click.get_current_context().meta.get("instruction_order", [])
+        context = CLIContext(
+            instructions=_read_prompt(prompt),
+            instruction_parts=_ordered_instruction_parts(
+                order, instructions, headed_instructions
+            ),
+            files=[FileRef(path=Path(path), label=label) for path, label in context_files],
+            model=model_id,
+            options=dict(options),
+            plan_args=list(plan_args),
+        )
+        _resolve_seed_inputs(db, fragments, attachments, context)
+
+        progress = None if quiet else (lambda message: click.echo(message, err=True))
+        logged: list[tuple[str, str]] = []
+        on_response = None
+        if logging_enabled(force_log=force_log, no_log=no_log):
+
+            def on_response(stage, response):
+                log_response(db, response)
+                logged.append((stage.name, response.id))
+
+        runner = PlanRunner(
+            loaded, context, on_response=on_response, progress=progress, retries=retries
+        )
+        try:
+            runner.run()
+        except PlanError as exc:
+            _emit_tracking(runner.run_id, logged, quiet)
+            raise click.ClickException(str(exc))
         _emit_tracking(runner.run_id, logged, quiet)
-        raise click.ClickException(str(exc))
-    _emit_tracking(runner.run_id, logged, quiet)
+    finally:
+        db.close()
 
     leaves = runner.leaf_stages()
     succeeded = [runner.results[name] for name in leaves if runner.results[name].success]

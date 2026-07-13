@@ -26,6 +26,14 @@ plan = "llm_plan"
 [project.optional-dependencies]
 test = ["pytest"]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error::ResourceWarning",
+    # Unclosed resources detected during garbage collection arrive wrapped
+    # in this warning rather than as plain ResourceWarnings.
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
