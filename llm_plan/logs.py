@@ -20,7 +20,11 @@ def open_logs_db(database: str | Path | None = None) -> sqlite_utils.Database:
     path = Path(database) if database else logs_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite_utils.Database(path)
-    migrate(db)
+    try:
+        migrate(db)
+    except Exception:
+        db.close()
+        raise
     return db
 
 
