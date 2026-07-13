@@ -1,7 +1,7 @@
 # Multi-model synthesis: several models analyse the same input in parallel,
 # then one model reconciles their answers into a single response.
 #
-#   llm plan synthesis_full "Your question" -f context.md
+#   llm plan synthesis "Your question" -f context.md
 #
 # Each analyst receives the CLI instructions (and any -f fragments); the
 # synthesis stage receives only the original question plus every analysis,
@@ -13,7 +13,7 @@
 # bundled copy).
 extends: "_defaults.yaml"
 
-name: "synthesis_full"
+name: "synthesis"
 summary: "Multi-model analysis in parallel, reconciled by a final synthesis"
 
 parallel_config:

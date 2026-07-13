@@ -11,7 +11,7 @@ from click_default_group import DefaultGroup
 
 from .logs import log_response, logging_enabled, open_logs_db
 from .models import FileRef, PlanError
-from .runner import CLIContext, DEFAULT_RETRIES, PlanRunner, explain, load_plan
+from .runner import DEFAULT_RETRIES, CLIContext, PlanRunner, explain, load_plan
 from .store import list_plans, resolve_plan, user_plan_dir
 
 
@@ -60,39 +60,108 @@ class _InstructionOrderCommand(click.Command):
 @plan.command(name="run", cls=_InstructionOrderCommand)
 @click.argument("plan_ref")
 @click.argument("prompt", required=False)
-@click.option("instructions", "-i", "--instruction", multiple=True,
-              help="Instruction text, before the prompt argument (repeatable)")
-@click.option("headed_instructions", "--ci", "--context-instruction", multiple=True,
-              type=(str, str),
-              help="Headed instructions: --ci TEXT HEADING (repeatable)")
-@click.option("fragments", "-f", "--fragment", multiple=True,
-              help="Seed context: file path, URL, alias, hash or prefix:argument")
-@click.option("context_files", "--cf", "--context-file", multiple=True,
-              type=(click.Path(exists=True, dir_okay=False), str),
-              help="Labelled seed file: --cf PATH LABEL (repeatable)")
-@click.option("attachments", "-a", "--attachment", multiple=True,
-              type=_AttachmentType(),
-              help="Seed attachment: path, URL or - for stdin")
-@click.option("model_id", "-m", "--model", envvar="LLM_MODEL",
-              help="Override the model for every LLM stage")
-@click.option("options", "-o", "--option", type=(str, str), multiple=True,
-              help="Model option key/value, applied to every LLM stage")
-@click.option("plan_args", "--plan-arg", multiple=True,
-              help="Extra argument forwarded to every script stage")
-@click.option("do_explain", "--explain", is_flag=True,
-              help="Print the plan's DAG and commands without executing")
-@click.option("--retries", default=DEFAULT_RETRIES, show_default=True,
-              type=click.IntRange(min=0),
-              help="Retries per LLM stage after a failure")
-@click.option("no_log", "-n", "--no-log", is_flag=True, help="Don't log to the database")
+@click.option(
+    "instructions",
+    "-i",
+    "--instruction",
+    multiple=True,
+    help="Instruction text, before the prompt argument (repeatable)",
+)
+@click.option(
+    "headed_instructions",
+    "--ci",
+    "--context-instruction",
+    multiple=True,
+    type=(str, str),
+    help="Headed instructions: --ci TEXT HEADING (repeatable)",
+)
+@click.option(
+    "fragments",
+    "-f",
+    "--fragment",
+    multiple=True,
+    help="Seed context: file path, URL, alias, hash or prefix:argument",
+)
+@click.option(
+    "context_files",
+    "--cf",
+    "--context-file",
+    multiple=True,
+    type=(click.Path(exists=True, dir_okay=False), str),
+    help="Labelled seed file: --cf PATH LABEL (repeatable)",
+)
+@click.option(
+    "attachments",
+    "-a",
+    "--attachment",
+    multiple=True,
+    type=_AttachmentType(),
+    help="Seed attachment: path, URL or - for stdin",
+)
+@click.option(
+    "model_id",
+    "-m",
+    "--model",
+    envvar="LLM_MODEL",
+    help="Override the model for every LLM stage",
+)
+@click.option(
+    "options",
+    "-o",
+    "--option",
+    type=(str, str),
+    multiple=True,
+    help="Model option key/value, applied to every LLM stage",
+)
+@click.option(
+    "plan_args",
+    "--plan-arg",
+    multiple=True,
+    help="Extra argument forwarded to every script stage",
+)
+@click.option(
+    "do_explain",
+    "--explain",
+    is_flag=True,
+    help="Print the plan's DAG and commands without executing",
+)
+@click.option(
+    "--retries",
+    default=DEFAULT_RETRIES,
+    show_default=True,
+    type=click.IntRange(min=0),
+    help="Retries per LLM stage after a failure",
+)
+@click.option(
+    "no_log", "-n", "--no-log", is_flag=True, help="Don't log to the database"
+)
 @click.option("force_log", "--log", is_flag=True, help="Log even if logging is off")
-@click.option("database", "-d", "--database",
-              type=click.Path(dir_okay=False, writable=True, allow_dash=False),
-              help="Path to a log database to use instead of logs.db")
+@click.option(
+    "database",
+    "-d",
+    "--database",
+    type=click.Path(dir_okay=False, writable=True, allow_dash=False),
+    help="Path to a log database to use instead of logs.db",
+)
 @click.option("quiet", "--quiet", is_flag=True, help="Suppress progress output")
-def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
-         context_files, attachments, model_id, options, plan_args, do_explain,
-         retries, no_log, force_log, database, quiet):
+def run_(
+    plan_ref,
+    prompt,
+    instructions,
+    headed_instructions,
+    fragments,
+    context_files,
+    attachments,
+    model_id,
+    options,
+    plan_args,
+    do_explain,
+    retries,
+    no_log,
+    force_log,
+    database,
+    quiet,
+):
     """Execute a plan by alias or path.
 
     The final (leaf) stage text prints to stdout; progress goes to stderr.
@@ -101,7 +170,7 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
 
     \b
     Examples:
-      llm plan run synthesis_full "Review this design" -f notes.md
+      llm plan run synthesis "Review this design" -f notes.md
       cat notes.md | llm plan run ./my_plan.yaml -m claude-4.5-haiku
     """
     try:
@@ -122,7 +191,9 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
             instruction_parts=_ordered_instruction_parts(
                 order, instructions, headed_instructions
             ),
-            files=[FileRef(path=Path(path), label=label) for path, label in context_files],
+            files=[
+                FileRef(path=Path(path), label=label) for path, label in context_files
+            ],
             model=model_id,
             options=dict(options),
             plan_args=list(plan_args),
@@ -178,7 +249,9 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
     failed = [name for name in leaves if not runner.results[name].success]
     if failed:
         details = "; ".join(f"{name}: {runner.results[name].error}" for name in failed)
-        raise click.ClickException(f"Plan '{loaded.name or plan_ref}' failed - {details}")
+        raise click.ClickException(
+            f"Plan '{loaded.name or plan_ref}' failed - {details}"
+        )
 
 
 class _LoggingFailed(Exception):
@@ -188,8 +261,11 @@ class _LoggingFailed(Exception):
 def _print_leaf_output(runner: PlanRunner) -> None:
     """Print each successful leaf stage's text, the plan's final output."""
     leaves = runner.leaf_stages()
-    succeeded = [runner.results[name] for name in leaves
-                 if name in runner.results and runner.results[name].success]
+    succeeded = [
+        runner.results[name]
+        for name in leaves
+        if name in runner.results and runner.results[name].success
+    ]
     for index, result in enumerate(succeeded):
         if len(succeeded) > 1:
             click.echo(f"## {result.name}\n")
@@ -279,14 +355,25 @@ def list_(as_json):
 
     plans = list_plans()
     if as_json:
-        click.echo(json.dumps(
-            [{"alias": p.alias, "name": p.name, "summary": p.summary, "path": str(p.path)}
-             for p in plans],
-            indent=2,
-        ))
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "alias": p.alias,
+                        "name": p.name,
+                        "summary": p.summary,
+                        "path": str(p.path),
+                    }
+                    for p in plans
+                ],
+                indent=2,
+            )
+        )
         return
     if not plans:
-        click.echo(f"No plans found. Add one to {user_plan_dir()} or set LLM_PLAN_DIRS.")
+        click.echo(
+            f"No plans found. Add one to {user_plan_dir()} or set LLM_PLAN_DIRS."
+        )
         return
     width = max(len(p.alias) for p in plans) + 2
     for p in plans:

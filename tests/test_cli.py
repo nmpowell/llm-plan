@@ -16,10 +16,18 @@ from conftest import write_plan
 
 
 def cli_stage(name="solo", model="echo", **kwargs):
-    return {"name": name, "summary": f"{name} stage", "model": model, "prompt": "CLI", **kwargs}
+    return {
+        "name": name,
+        "summary": f"{name} stage",
+        "model": model,
+        "prompt": "CLI",
+        **kwargs,
+    }
 
 
-PINNED_SYNTHESISE_SHA256 = "61425345ac41aae86be956a3910dc9ba9d6c81b5c05a6c7b7b7d796b13540f5b"
+PINNED_SYNTHESISE_SHA256 = (
+    "61425345ac41aae86be956a3910dc9ba9d6c81b5c05a6c7b7b7d796b13540f5b"
+)
 
 
 def invoke(*args, **kwargs):
@@ -80,7 +88,9 @@ class TestPlanRun:
     def test_stdin_and_argument_combine_stdin_first(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
 
-        result = invoke("plan", "run", str(plan), "and the argument", input="from stdin")
+        result = invoke(
+            "plan", "run", str(plan), "and the argument", input="from stdin"
+        )
 
         assert result.stdout == "ECHO[from stdin and the argument]\n"
 
@@ -90,7 +100,10 @@ class TestPlanRun:
         plan = write_plan(tmp_path, [cli_stage()])
 
         result = invoke(
-            "plan", "run", str(plan), "explain this",
+            "plan",
+            "run",
+            str(plan),
+            "explain this",
             input="def f():\n        return 1\n",
         )
 
@@ -152,8 +165,14 @@ class TestPlanRun:
         plan = write_plan(tmp_path, [cli_stage()])
 
         result = invoke(
-            "plan", "run", str(plan), "and the argument",
-            "-i", "first instruction", "-i", "second instruction",
+            "plan",
+            "run",
+            str(plan),
+            "and the argument",
+            "-i",
+            "first instruction",
+            "-i",
+            "second instruction",
         )
 
         assert result.exit_code == 0, result.stderr
@@ -165,8 +184,13 @@ class TestPlanRun:
         plan = write_plan(tmp_path, [cli_stage()])
 
         result = invoke(
-            "plan", "run", str(plan), "the question",
-            "--ci", "look at concurrency", "Focus Areas",
+            "plan",
+            "run",
+            str(plan),
+            "the question",
+            "--ci",
+            "look at concurrency",
+            "Focus Areas",
         )
 
         assert result.exit_code == 0, result.stderr
@@ -177,10 +201,16 @@ class TestPlanRun:
         plan = write_plan(tmp_path, [cli_stage()])
 
         result = invoke(
-            "plan", "run", str(plan),
-            "-i", "first plain",
-            "--ci", "second headed", "Second Heading",
-            "-i", "third plain",
+            "plan",
+            "run",
+            str(plan),
+            "-i",
+            "first plain",
+            "--ci",
+            "second headed",
+            "Second Heading",
+            "-i",
+            "third plain",
         )
 
         assert result.exit_code == 0, result.stderr
@@ -197,8 +227,15 @@ class TestPlanRun:
         [
             ["--ci=headed text", "The Heading", "-i", "plain text"],
             ["--ci", "headed text", "The Heading", "-iplain text"],
-            ["--ci", "headed text", "The Heading", "-i", "plain text",
-             "--plan-arg", "--ci"],
+            [
+                "--ci",
+                "headed text",
+                "The Heading",
+                "-i",
+                "plain text",
+                "--plan-arg",
+                "--ci",
+            ],
         ],
         ids=["equals-form", "attached-short-form", "flag-like-option-value"],
     )
@@ -357,8 +394,14 @@ class TestAttachments:
         plan = write_plan(tmp_path, [cli_stage()])
 
         result = invoke(
-            "plan", "run", str(plan), "hi",
-            "-a", "https://bad.example/x.png", "--retries", "0",
+            "plan",
+            "run",
+            str(plan),
+            "hi",
+            "-a",
+            "https://bad.example/x.png",
+            "--retries",
+            "0",
         )
 
         assert result.exit_code == 2
@@ -374,28 +417,37 @@ class TestAttachments:
 
 
 class TestBundledPlans:
-    def test_synthesis_full_has_the_expected_stage_structure(self):
+    def test_synthesis_has_the_expected_stage_structure(self):
         from llm_plan.runner import load_plan
         from llm_plan.store import resolve_plan
 
-        plan = load_plan(resolve_plan("synthesis_full"))
+        plan = load_plan(resolve_plan("synthesis"))
 
         stages = {stage.name: stage for stage in plan.stages}
         assert [s.name for s in plan.stages] == [
-            "opus", "sonnet", "gemini_pro", "gpt5", "synthesis",
+            "opus",
+            "sonnet",
+            "gemini_pro",
+            "gpt5",
+            "synthesis",
         ]
         assert stages["gemini_pro"].produces == "Gemini Pro Analysis"
         assert all(
             stages[name].prompt_label == "Instructions"
             for name in ("opus", "sonnet", "gemini_pro", "gpt5")
         )
-        assert stages["synthesis"].depends_on == ["opus", "sonnet", "gemini_pro", "gpt5"]
+        assert stages["synthesis"].depends_on == [
+            "opus",
+            "sonnet",
+            "gemini_pro",
+            "gpt5",
+        ]
         assert stages["synthesis"].partial_dependencies is True
         assert stages["synthesis"].produces == "Final Synthesis"
         assert plan.max_workers == 7
 
     def test_the_bundled_synthesis_prompt_is_pinned(self):
-        # Changing the bundled prompt changes what the synthesis_full alias
+        # Changing the bundled prompt changes what the synthesis alias
         # does for everyone, so any edit must be deliberate.
         import hashlib
 
@@ -405,8 +457,8 @@ class TestBundledPlans:
 
         assert hashlib.sha256(content).hexdigest() == PINNED_SYNTHESISE_SHA256
 
-    def test_synthesis_full_runs_end_to_end_with_a_model_override(self, tmp_path):
-        result = invoke("plan", "run", "synthesis_full", "the question", "-m", "echo")
+    def test_synthesis_runs_end_to_end_with_a_model_override(self, tmp_path):
+        result = invoke("plan", "run", "synthesis", "the question", "-m", "echo")
 
         assert result.exit_code == 0, result.stderr
         assert result.stdout.startswith("ECHO[")
@@ -416,20 +468,23 @@ class TestBundledPlans:
         assert "the question" in result.stdout
 
     def test_show_prints_the_bundled_yaml(self):
-        result = invoke("plan", "show", "synthesis_full")
+        result = invoke("plan", "show", "synthesis")
 
         assert result.exit_code == 0
-        assert "name: \"synthesis_full\"" in result.stdout
-        assert "plan_synthesis_full.yaml" in result.stderr
+        assert 'name: "synthesis"' in result.stdout
+        assert "plan_synthesis.yaml" in result.stderr
 
 
 class TestPlanList:
     def test_lists_aliases_and_summaries_in_aligned_columns(self, user_dir):
         plans = user_dir / "plans"
-        write_plan(plans, [cli_stage()], filename="plan_zz.yaml",
-                   summary="the zz plan")
-        write_plan(plans, [cli_stage()], filename="plan_a_much_longer_alias.yaml",
-                   summary="the long plan")
+        write_plan(plans, [cli_stage()], filename="plan_zz.yaml", summary="the zz plan")
+        write_plan(
+            plans,
+            [cli_stage()],
+            filename="plan_a_much_longer_alias.yaml",
+            summary="the long plan",
+        )
 
         result = invoke("plan", "list")
 
@@ -439,8 +494,12 @@ class TestPlanList:
         assert "zz                   the zz plan" in lines
 
     def test_json_output_has_alias_name_summary_and_path(self, user_dir):
-        path = write_plan(user_dir / "plans", [cli_stage()],
-                          filename="plan_review.yaml", summary="reviews things")
+        path = write_plan(
+            user_dir / "plans",
+            [cli_stage()],
+            filename="plan_review.yaml",
+            summary="reviews things",
+        )
 
         result = invoke("plan", "list", "--json")
 
@@ -456,9 +515,7 @@ class TestPlanList:
     def test_no_plans_found_message_names_the_user_dir(
         self, user_dir, tmp_path, monkeypatch
     ):
-        monkeypatch.setattr(
-            "llm_plan.store.BUNDLED_PLAN_DIR", tmp_path / "no-bundle"
-        )
+        monkeypatch.setattr("llm_plan.store.BUNDLED_PLAN_DIR", tmp_path / "no-bundle")
 
         result = invoke("plan", "list")
 
@@ -471,7 +528,8 @@ class TestScriptStages:
     def test_python_script_stage_runs_end_to_end(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AMBIENT_VAR", "ambient-value")
         script = tmp_path / "record.py"
-        script.write_text(textwrap.dedent("""\
+        script.write_text(
+            textwrap.dedent("""\
             import json, os, sys
             out = os.path.join(os.environ["LLM_PLAN_OUTPUT_DIR"], "record.json")
             with open(out, "w") as f:
@@ -481,12 +539,21 @@ class TestScriptStages:
                     "inherited_env": os.environ.get("AMBIENT_VAR"),
                 }, f)
             print(out)
-        """), encoding="utf-8")
-        plan = write_plan(tmp_path, [{
-            "name": "worker", "summary": "records its inputs",
-            "type": "python_script", "script": "record.py",
-            "env": {"CUSTOM_VAR": "custom-value"},
-        }])
+        """),
+            encoding="utf-8",
+        )
+        plan = write_plan(
+            tmp_path,
+            [
+                {
+                    "name": "worker",
+                    "summary": "records its inputs",
+                    "type": "python_script",
+                    "script": "record.py",
+                    "env": {"CUSTOM_VAR": "custom-value"},
+                }
+            ],
+        )
 
         result = invoke(
             "plan", "run", str(plan), "--plan-arg", "--pr", "--plan-arg", "123"
@@ -528,8 +595,13 @@ class TestExplain:
     def test_explain_prints_the_dag_without_executing(self, tmp_path, fake_models):
         stages = [
             cli_stage("analyst", produces="Analysis"),
-            {"name": "synthesis", "summary": "combine", "model": "other",
-             "depends_on": ["analyst"], "prompt": "inline:Combine."},
+            {
+                "name": "synthesis",
+                "summary": "combine",
+                "model": "other",
+                "depends_on": ["analyst"],
+                "prompt": "inline:Combine.",
+            },
         ]
         plan = write_plan(tmp_path, stages)
 
@@ -587,9 +659,7 @@ class TestLogging:
         conversations = list(logs_db["conversations"].rows)
         assert [c["id"] for c in conversations] == [run_id]
         assert conversations[0]["name"] == "test"
-        assert {
-            row["conversation_id"] for row in logs_db["responses"].rows
-        } == {run_id}
+        assert {row["conversation_id"] for row in logs_db["responses"].rows} == {run_id}
 
     def test_a_logging_failure_fails_the_run_but_keeps_the_output(
         self, tmp_path, monkeypatch
@@ -624,7 +694,9 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi", "-n")
 
         assert result.exit_code == 0, result.stderr
-        assert "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
+        assert (
+            "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
+        )
 
     def test_logs_off_sentinel_is_respected(self, tmp_path, user_dir, logs_db):
         (user_dir / "logs-off").touch()
@@ -633,7 +705,9 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi")
 
         assert result.exit_code == 0, result.stderr
-        assert "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
+        assert (
+            "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
+        )
 
     def test_log_and_no_log_together_are_rejected(self, tmp_path, fake_models):
         plan = write_plan(tmp_path, [cli_stage()])
