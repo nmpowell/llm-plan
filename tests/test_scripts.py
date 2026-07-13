@@ -130,6 +130,15 @@ class TestScriptExecution:
         assert "binary.bin" in results["worker"].error
 
 
+class TestScriptSandbox:
+    def test_scratch_directories_stay_inside_the_test_sandbox(self, tmp_path, run_plan):
+        runner, results = run_plan([script_stage(tmp_path, WRITER_SCRIPT)])
+
+        assert all(
+            str(path).startswith(str(tmp_path)) for path in results["worker"].files
+        ), results["worker"].files
+
+
 class TestScriptInputs:
     def test_env_plan_args_and_runtime_vars_reach_the_script(self, tmp_path, run_plan):
         stage = script_stage(

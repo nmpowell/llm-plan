@@ -6,6 +6,7 @@ import os
 os.environ.setdefault("LLM_LOAD_PLUGINS", "llm-plan")
 
 import base64
+import tempfile
 import threading
 import time
 from types import SimpleNamespace
@@ -62,10 +63,18 @@ def run_plan(tmp_path):
 
 @pytest.fixture(autouse=True)
 def user_dir(monkeypatch, tmp_path):
-    """Isolate every test from the real llm user directory."""
+    """Isolate every test from the developer's real environment.
+
+    Points llm's user directory and the runner's scratch directories into
+    the test sandbox, and clears ambient variables that would change plan
+    discovery or let a stray test reach a real provider.
+    """
     llm_dir = tmp_path / "llm-user"
     llm_dir.mkdir()
     monkeypatch.setenv("LLM_USER_PATH", str(llm_dir))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    for name in ("LLM_PLAN_DIRS", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
     return llm_dir
 
 
