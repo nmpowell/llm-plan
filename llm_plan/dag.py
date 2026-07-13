@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import deque
 
 from .models import Plan, PlanError, Stage
-from .parser import prompt_has_cli
+from .parser import prompt_chain_targets, prompt_has_cli
 
 SEED = "seed"
 
@@ -28,9 +28,15 @@ def resolve_dependencies(stage: Stage, index: int, stages: list[Stage]) -> list[
 
 
 def validate_plan(plan: Plan) -> None:
-    """Check stage-name uniqueness, dependency references, order and acyclicity."""
+    """Check stage names (unique, not the reserved 'seed'), dependency and
+    ``chain:`` references, order and acyclicity."""
     stages = plan.stages
     names = [s.name for s in stages]
+    if SEED in names:
+        raise PlanError(
+            f"Stage name '{SEED}' is reserved for the virtual seed node; "
+            f"rename that stage."
+        )
     duplicates = sorted({n for n in names if names.count(n) > 1})
     if duplicates:
         raise PlanError(f"Duplicate stage names: {duplicates}")
@@ -40,6 +46,12 @@ def validate_plan(plan: Plan) -> None:
         for dep in stage.depends_on:
             if dep not in known:
                 raise PlanError(f"Stage '{stage.name}' depends on unknown stage '{dep}'")
+        for target in prompt_chain_targets(stage.prompt):
+            if target not in names:
+                raise PlanError(
+                    f"Stage '{stage.name}' references chain:'{target}' but no "
+                    f"stage has that name"
+                )
 
     seen = {SEED}
     for index, stage in enumerate(stages):

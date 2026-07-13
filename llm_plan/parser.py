@@ -7,6 +7,7 @@ resolves aliases itself) rather than through a local alias table.
 
 from __future__ import annotations
 
+import difflib
 import re
 import warnings
 from pathlib import Path
@@ -22,11 +23,49 @@ RESERVED_KEYS = frozenset({"extends", "name", "summary", "version", "stages", "p
 # Namespaces resolved at stage-execution time, not load time.
 RUNTIME_NAMESPACES = frozenset({"cli", "run"})
 
+# Every key a stage mapping may contain; anything else is a typo.
+KNOWN_STAGE_KEYS = frozenset(
+    {
+        "name",
+        "summary",
+        "type",
+        "model",
+        "prompt",
+        "prompt_label",
+        "options",
+        "script",
+        "script_args",
+        "python",
+        "timeout",
+        "env",
+        "depends_on",
+        "produces",
+        "exclusive",
+        "continue_on_failure",
+        "partial_dependencies",
+        "files",
+        "attachments",
+    }
+)
+
 _VARIABLE_RE = re.compile(r"\$\{([^}]+)\}")
 
 
 def load_with_extends(plan_file: Path) -> dict:
-    """Load a plan YAML, merging any ``extends:`` base file underneath it."""
+    """Load a plan YAML, recursively merging its ``extends:`` chain underneath.
+
+    A child's values override its parent's, which override the grandparent's,
+    and so on up the chain. A circular chain is a PlanError.
+    """
+    return _load_with_extends(Path(plan_file), ancestors=())
+
+
+def _load_with_extends(plan_file: Path, ancestors: tuple[Path, ...]) -> dict:
+    resolved = plan_file.resolve()
+    if resolved in ancestors:
+        chain = " -> ".join(str(path) for path in (*ancestors, resolved))
+        raise PlanError(f"Circular 'extends' chain: {chain}")
+
     data = _load_yaml_mapping(plan_file)
     if not data:
         return {}
@@ -37,9 +76,9 @@ def load_with_extends(plan_file: Path) -> dict:
             raise PlanError(
                 f"Extended file not found: {base_path} (referenced from {plan_file})"
             )
-        base = _load_yaml_mapping(base_path)
-        data = deep_merge(base, data)
+        base = _load_with_extends(base_path, (*ancestors, resolved))
         del data["extends"]
+        data = deep_merge(base, data)
 
     return data
 
@@ -163,30 +202,41 @@ def parse_prompt_field(
     return (PromptType.INLINE, prompt)
 
 
+def _prompt_texts(prompt: str | list | None) -> list[str]:
+    """The text of each prompt item, skipping malformed entries."""
+    if not prompt:
+        return []
+    texts = []
+    for item in prompt if isinstance(prompt, list) else [prompt]:
+        text = item.get("prompt", "") if isinstance(item, dict) else item
+        if isinstance(text, str):
+            texts.append(text)
+    return texts
+
+
 def prompt_has_cli(prompt: str | list | None) -> bool:
     """True if any element of the prompt field references CLI input."""
-    if not prompt:
-        return False
-    items = prompt if isinstance(prompt, list) else [prompt]
-    for item in items:
-        text = item.get("prompt", "") if isinstance(item, dict) else item
-        if isinstance(text, str) and (
-            text.upper() == "CLI" or text.upper().startswith("CLI:")
-        ):
-            return True
-    return False
+    return any(
+        text.upper() == "CLI" or text.upper().startswith("CLI:")
+        for text in _prompt_texts(prompt)
+    )
 
 
 def prompt_wants_cli_files(prompt: str | list | None) -> bool:
     """True if any CLI token in the prompt asks for the CLI seed files."""
-    if not prompt:
-        return False
-    items = prompt if isinstance(prompt, list) else [prompt]
-    for item in items:
-        text = item.get("prompt", "") if isinstance(item, dict) else item
-        if isinstance(text, str) and text.upper() in ("CLI", "CLI:FILES", "CLI:ALL"):
-            return True
-    return False
+    return any(
+        text.upper() in ("CLI", "CLI:FILES", "CLI:ALL")
+        for text in _prompt_texts(prompt)
+    )
+
+
+def prompt_chain_targets(prompt: str | list | None) -> list[str]:
+    """Stage names referenced by ``chain:`` items in a prompt field."""
+    return [
+        text[len("chain:"):]
+        for text in _prompt_texts(prompt)
+        if text.startswith("chain:")
+    ]
 
 
 def parse_prompt_list(
@@ -207,24 +257,7 @@ def parse_prompt_list(
     if not prompt:
         return PromptSpec()
 
-    items: list[tuple[str, str | None]] = []
-    for entry in prompt if isinstance(prompt, list) else [prompt]:
-        if isinstance(entry, str):
-            items.append((entry, None))
-        elif isinstance(entry, dict) and "prompt" in entry:
-            items.append((entry["prompt"], entry.get("label")))
-        elif isinstance(entry, dict) and "inline" in entry:
-            # YAML trap: `prompt: inline: text` parses as a mapping, not the
-            # string "inline:text".
-            raise PlanError(
-                f"Stage '{stage_name}': prompt item {entry!r} is a mapping. "
-                f'Quote inline prompts as a string: "inline:..."'
-            )
-        else:
-            raise PlanError(
-                f"Stage '{stage_name}': invalid prompt item {entry!r}; expected a "
-                f"string or a {{prompt, label}} mapping"
-            )
+    items = _prompt_items(prompt, stage_name)
 
     spec_files: list[FileRef] = []
     sections: list[tuple[str | None, str]] = []
@@ -268,6 +301,41 @@ def parse_prompt_list(
     )
 
 
+def _prompt_items(
+    prompt: str | list, stage_name: str
+) -> list[tuple[str, str | None]]:
+    """Normalise a prompt field (scalar or list) into (text, label) pairs."""
+    items: list[tuple[str, str | None]] = []
+    for entry in prompt if isinstance(prompt, list) else [prompt]:
+        if isinstance(entry, str):
+            items.append((entry, None))
+        elif isinstance(entry, dict) and "prompt" in entry:
+            if not isinstance(entry["prompt"], str):
+                raise PlanError(
+                    f"Stage '{stage_name}': prompt item {entry!r} must have a "
+                    f"string 'prompt'"
+                )
+            label = entry.get("label")
+            if label is not None and not isinstance(label, str):
+                raise PlanError(
+                    f"Stage '{stage_name}': prompt label {label!r} must be a string"
+                )
+            items.append((entry["prompt"], label))
+        elif isinstance(entry, dict) and "inline" in entry:
+            # YAML trap: `prompt: inline: text` parses as a mapping, not the
+            # string "inline:text".
+            raise PlanError(
+                f"Stage '{stage_name}': prompt item {entry!r} is a mapping. "
+                f'Quote inline prompts as a string: "inline:..."'
+            )
+        else:
+            raise PlanError(
+                f"Stage '{stage_name}': invalid prompt item {entry!r}; expected a "
+                f"string or a {{prompt, label}} mapping"
+            )
+    return items
+
+
 def parse_plan(plan_file: Path) -> Plan:
     """Parse a plan file into a Plan, validating stages and their paths.
 
@@ -283,8 +351,7 @@ def parse_plan(plan_file: Path) -> Plan:
         for key, value in data.items()
         if key not in RESERVED_KEYS and isinstance(value, dict)
     }
-    if variables:
-        data = substitute_variables(data, variables, defer=RUNTIME_NAMESPACES)
+    data = substitute_variables(data, variables, defer=RUNTIME_NAMESPACES)
 
     stages_data = data.get("stages") or []
     if not stages_data:
@@ -330,6 +397,10 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         raise error("'name' is required")
     name_suffix = f" ({name})"
 
+    unknown_keys = sorted(set(stage_data) - KNOWN_STAGE_KEYS)
+    if unknown_keys:
+        raise error(_unknown_keys_message(unknown_keys))
+
     summary = stage_data.get("summary")
     if not summary:
         raise error("'summary' is required")
@@ -369,10 +440,27 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
     if not isinstance(options, dict):
         raise error("'options' must be a mapping")
 
+    depends_on = stage_data.get("depends_on") or []
+    if not isinstance(depends_on, list):
+        raise error(f"'depends_on' must be a list of stage names, not {depends_on!r}")
+    non_strings = [dep for dep in depends_on if not isinstance(dep, str)]
+    if non_strings:
+        raise error(f"'depends_on' entries must be strings; got {non_strings!r}")
+    duplicate_deps = sorted({dep for dep in depends_on if depends_on.count(dep) > 1})
+    if duplicate_deps:
+        raise error(f"'depends_on' has duplicate entries: {duplicate_deps}")
+
+    for flag in ("exclusive", "continue_on_failure", "partial_dependencies"):
+        flag_value = stage_data.get(flag, False)
+        if not isinstance(flag_value, bool):
+            raise error(f"'{flag}' must be a boolean (true/false), not {flag_value!r}")
+
     prompt = stage_data.get("prompt")
-    if isinstance(prompt, str):
-        # Fail fast on a missing scalar file prompt, before any stage runs.
-        parse_prompt_field(prompt, name, base_dir=plan_file.parent)
+    if prompt:
+        # Fail fast on a malformed entry or missing prompt file, before any
+        # stage runs (and spends money).
+        for text, _label in _prompt_items(prompt, name):
+            parse_prompt_field(text, name, base_dir=plan_file.parent)
 
     files_data = stage_data.get("files", [])
     if not isinstance(files_data, list):
@@ -422,7 +510,7 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         python=stage_data.get("python", "python3"),
         timeout=timeout,
         env=env,
-        depends_on=stage_data.get("depends_on") or [],
+        depends_on=depends_on,
         produces=stage_data.get("produces"),
         exclusive=stage_data.get("exclusive", False),
         continue_on_failure=stage_data.get("continue_on_failure", False),
@@ -431,6 +519,15 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         resolved_attachments=resolved_attachments,
         resolved_script=resolved_script,
     )
+
+
+def _unknown_keys_message(unknown_keys: list[str]) -> str:
+    parts = []
+    for key in unknown_keys:
+        close = difflib.get_close_matches(key, KNOWN_STAGE_KEYS, n=1)
+        suggestion = f" (did you mean '{close[0]}'?)" if close else ""
+        parts.append(f"unknown key '{key}'{suggestion}")
+    return f"{'; '.join(parts)}. Valid keys: {', '.join(sorted(KNOWN_STAGE_KEYS))}"
 
 
 def _resolve_path(value: str, plan_file: Path) -> Path:

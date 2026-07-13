@@ -43,6 +43,30 @@ class TestLoadWithExtends:
         assert data["name"] == "p"
         assert "extends" not in data
 
+    def test_extends_resolves_recursively_through_a_grandparent(self, tmp_path):
+        write_yaml(
+            tmp_path / "_grand.yaml", {"models": {"fast": "echo", "slow": "opus"}}
+        )
+        write_yaml(
+            tmp_path / "_base.yaml",
+            {"extends": "_grand.yaml", "models": {"slow": "sonnet"}},
+        )
+        plan_file = write_yaml(
+            tmp_path / "plan.yaml", {"extends": "_base.yaml", "name": "p"}
+        )
+
+        data = load_with_extends(plan_file)
+
+        assert data["models"] == {"fast": "echo", "slow": "sonnet"}
+        assert "extends" not in data
+
+    def test_circular_extends_is_an_error_naming_the_files(self, tmp_path):
+        write_yaml(tmp_path / "a.yaml", {"extends": "b.yaml", "name": "a"})
+        plan_file = write_yaml(tmp_path / "b.yaml", {"extends": "a.yaml", "name": "b"})
+
+        with pytest.raises(PlanError, match=r"[Cc]ircular.*b\.yaml.*a\.yaml.*b\.yaml"):
+            load_with_extends(plan_file)
+
     def test_missing_extends_target_is_an_error(self, tmp_path):
         plan_file = write_yaml(tmp_path / "plan.yaml", {"extends": "nope.yaml"})
 
@@ -220,6 +244,23 @@ class TestParsePlan:
         assert plan.stages[0].model == "echo"
         assert plan.stages[0].prompt == "inline:think step by step"
 
+    def test_undefined_variable_fails_at_load_even_without_namespaces(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["model"] = "${missing.value}"
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match=r"Variable '\$\{missing\.value\}' not found"):
+            parse_plan(plan_file)
+
+    def test_runtime_tokens_pass_through_untouched_without_namespaces(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["prompt"] = "inline:${cli.instructions} into ${run.output_dir}"
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        plan = parse_plan(plan_file)
+
+        assert plan.stages[0].prompt == "inline:${cli.instructions} into ${run.output_dir}"
+
     def test_reads_parallel_config_max_workers(self, tmp_path):
         plan_file = write_yaml(
             tmp_path / "plan.yaml", minimal_plan(parallel_config={"max_workers": 7})
@@ -296,6 +337,71 @@ class TestParsePlan:
         plan_file = write_yaml(tmp_path / "plan.yaml", data)
 
         with pytest.raises(PlanError, match=message):
+            parse_plan(plan_file)
+
+    @pytest.mark.parametrize(
+        "flag", ["exclusive", "continue_on_failure", "partial_dependencies"]
+    )
+    @pytest.mark.parametrize("bad_value", ["false", 0, 1, None], ids=repr)
+    def test_boolean_stage_fields_reject_non_booleans(self, tmp_path, flag, bad_value):
+        data = minimal_plan()
+        data["stages"][0][flag] = bad_value
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match=f"first.*'{flag}' must be a boolean"):
+            parse_plan(plan_file)
+
+    @pytest.mark.parametrize("bad_value", ["opus", 3, {"stage": "opus"}], ids=repr)
+    def test_non_list_depends_on_is_an_error(self, tmp_path, bad_value):
+        data = minimal_plan()
+        data["stages"][0]["depends_on"] = bad_value
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="'depends_on' must be a list"):
+            parse_plan(plan_file)
+
+    def test_non_string_depends_on_item_is_an_error(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["depends_on"] = ["opus", 3]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="'depends_on' entries must be strings"):
+            parse_plan(plan_file)
+
+    def test_duplicate_depends_on_entries_are_an_error(self, tmp_path):
+        data = minimal_plan()
+        data["stages"].append(
+            {
+                "name": "second",
+                "summary": "second stage",
+                "model": "echo",
+                "prompt": "inline:go",
+                "depends_on": ["first", "first"],
+            }
+        )
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="second.*duplicate.*first"):
+            parse_plan(plan_file)
+
+    def test_misspelt_stage_key_gets_a_did_you_mean(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["depend_on"] = ["other"]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(
+            PlanError, match="first.*unknown key 'depend_on'.*did you mean 'depends_on'"
+        ):
+            parse_plan(plan_file)
+
+    def test_unrecognisable_stage_key_lists_the_valid_keys(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["zzz_frobnicate"] = True
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(
+            PlanError, match="unknown key 'zzz_frobnicate'.*Valid keys:.*depends_on"
+        ):
             parse_plan(plan_file)
 
     def test_empty_plan_file_is_an_error(self, tmp_path):
@@ -398,6 +504,41 @@ class TestParsePlan:
         assert stage.resolved_attachments[0].is_url
         assert stage.resolved_attachments[1].uri == str(tmp_path / "img.png")
         assert not stage.resolved_attachments[1].is_url
+
+    def test_list_prompt_file_must_exist_at_load_time(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["prompt"] = [
+            "CLI:instructions",
+            {"prompt": "missing_prompt.md", "label": "Guide"},
+        ]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="missing_prompt.md"):
+            parse_plan(plan_file)
+
+    def test_non_string_prompt_in_a_list_entry_is_an_error_at_load(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["prompt"] = [{"prompt": 123}]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="first.*123.*string"):
+            parse_plan(plan_file)
+
+    def test_non_string_prompt_label_is_an_error_at_load(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["prompt"] = [{"prompt": "inline:go", "label": 7}]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="first.*label.*string"):
+            parse_plan(plan_file)
+
+    def test_invalid_cli_form_in_a_list_entry_is_an_error_at_load(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0]["prompt"] = ["CLI:everything"]
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="CLI:instructions, CLI:files, CLI:all"):
+            parse_plan(plan_file)
 
     def test_scalar_file_prompt_must_exist_at_load_time(self, tmp_path):
         data = minimal_plan()

@@ -63,9 +63,37 @@ class TestValidatePlan:
                 )
             )
 
+    def test_stage_named_seed_is_rejected_as_reserved(self):
+        with pytest.raises(PlanError, match="'seed' is reserved"):
+            validate_plan(make_plan(make_stage("seed")))
+
     def test_duplicate_stage_names_are_an_error(self):
         with pytest.raises(PlanError, match="[Dd]uplicate.*twin"):
             validate_plan(make_plan(make_stage("twin"), make_stage("twin")))
+
+    @pytest.mark.parametrize(
+        "prompt",
+        ["chain:ghost", [{"prompt": "chain:ghost", "label": "Analysis"}]],
+        ids=["scalar", "list-mapping"],
+    )
+    def test_chain_to_an_unknown_stage_is_an_error(self, prompt):
+        with pytest.raises(PlanError, match="'follow_up'.*chain:'ghost'"):
+            validate_plan(
+                make_plan(
+                    make_stage("analyst"),
+                    make_stage("follow_up", prompt=prompt, depends_on=["analyst"]),
+                )
+            )
+
+    def test_chain_to_a_known_stage_is_accepted(self):
+        validate_plan(
+            make_plan(
+                make_stage("analyst"),
+                make_stage(
+                    "follow_up", prompt="chain:analyst", depends_on=["analyst"]
+                ),
+            )
+        )
 
     def test_self_dependency_is_an_error(self):
         with pytest.raises(PlanError, match="'a' depends on 'a'"):
