@@ -161,6 +161,8 @@ class PlanRunner:
         self._manifests: dict[str, dict] = {}
         self._scratch_dir: Path | None = None
         self._scratch_lock = threading.Lock()
+        self._active_scripts: set[subprocess.Popen] = set()
+        self._scripts_lock = threading.Lock()
 
     def run(self) -> list[StageResult]:
         """Execute every stage; results in listed-stage order."""
@@ -252,7 +254,7 @@ class PlanRunner:
             ready.sort(key=lambda s: position[s.name])
 
         executor = ThreadPoolExecutor(max_workers=self.plan.max_workers)
-        interrupted = False
+        aborted = False
         try:
             while ready or running:
                 while ready:
@@ -284,13 +286,24 @@ class PlanRunner:
                     result, response = future.result()
                     self._finish(stage, result, response, failed)
                     release(stage)
-        except KeyboardInterrupt:
-            interrupted = True
+        except BaseException:
+            aborted = True
+            # Workers blocked on a script's pipes cannot see the abort; kill
+            # their scripts so the threads unwind instead of running on.
+            self._abort_scripts()
             raise
         finally:
-            # Ctrl-C must not block on in-flight stages: abandon them and
-            # cancel anything queued. Every other exit drains the pool.
-            executor.shutdown(wait=not interrupted, cancel_futures=interrupted)
+            # A fatal exit (ctrl-C, a logging failure, LLM_RAISE_ERRORS) must
+            # not block on in-flight stages or drain - and bill - the queued
+            # ones: abandon what runs and cancel the rest. A normal exit
+            # drains the pool.
+            executor.shutdown(wait=not aborted, cancel_futures=aborted)
+
+    def _abort_scripts(self) -> None:
+        """Kill every live script process group; their threads do the reaping."""
+        with self._scripts_lock:
+            for process in list(self._active_scripts):
+                _kill_process_group(process)
 
     def _skip_for_failed_deps(self, stage: Stage, deps: list[str], failed: set[str]) -> bool:
         failed_deps = [d for d in deps if d in failed]
@@ -467,20 +480,34 @@ class PlanRunner:
                 encoding="utf-8",
                 errors="replace",
                 env=env,
-                start_new_session=True,
+                start_new_session=hasattr(os, "setsid"),
             )
         except OSError as exc:
             return failure(f"could not run script: {exc}")
 
+        with self._scripts_lock:
+            self._active_scripts.add(process)
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _kill_process_group(process)
-            _, stderr = process.communicate()
-            error = f"script timeout: exceeded {timeout}s"
-            if stderr.strip():
-                error += f"\n{stderr.strip()[-2000:]}"
-            return failure(error)
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_process_group(process)
+                _, stderr = process.communicate()
+                error = f"script timeout: exceeded {timeout}s"
+                if stderr.strip():
+                    error += f"\n{stderr.strip()[-2000:]}"
+                return failure(error)
+            except BaseException:
+                # A ctrl-C (sequential mode) or an abort landing on this
+                # thread: the script's session never sees the signal, so kill
+                # it and reap before unwinding, or it outlives the run with
+                # both pipes open.
+                _kill_process_group(process)
+                process.communicate()
+                raise
+        finally:
+            with self._scripts_lock:
+                self._active_scripts.discard(process)
 
         if process.returncode != 0:
             error = f"script exited with code {process.returncode}"
@@ -732,10 +759,14 @@ def _render_validation_error(exc: pydantic.ValidationError) -> str:
 
 
 def _kill_process_group(process: subprocess.Popen) -> None:
-    """Kill a timed-out script and everything it spawned.
+    """Kill an aborted script and everything it spawned.
 
-    The script runs as its own session leader, so its pid is the group id.
+    On POSIX the script runs as its own session leader, so its pid is the
+    group id. Elsewhere (no killpg) only the direct child can be killed.
     """
+    if not hasattr(os, "killpg"):
+        process.kill()
+        return
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:  # every group member already exited

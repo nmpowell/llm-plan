@@ -150,8 +150,10 @@ class HoldModel(llm.Model):
 
     def __init__(self):
         self.release = threading.Event()
+        self.calls = 0
 
     def execute(self, prompt, stream, response, conversation):
+        self.calls += 1
         self.release.wait(timeout=2)
         yield "HELD"
 
@@ -168,6 +170,20 @@ class NeedsKeyModel(llm.Model):
     def execute(self, prompt, stream, response, conversation):
         self.calls += 1
         raise llm.NeedsKeyException("No key found for model 'needskey'")
+
+
+class InterruptModel(llm.Model):
+    """Waits for its gate, then raises KeyboardInterrupt (a ctrl-C stand-in)."""
+
+    model_id = "interrupt"
+    can_stream = True
+
+    def __init__(self):
+        self.gate = threading.Event()
+
+    def execute(self, prompt, stream, response, conversation):
+        self.gate.wait(timeout=5)
+        raise KeyboardInterrupt
 
 
 class RaisingModel(llm.Model):
@@ -229,6 +245,7 @@ def fake_models():
         other=EchoModel(model_id="other"),
         flaky=FlakyModel(),
         hold=HoldModel(),
+        interrupt=InterruptModel(),
         needskey=NeedsKeyModel(),
         nostream=NonStreamingModel(),
         pair=PairModel(),
@@ -245,6 +262,7 @@ def fake_models():
             register(models.other)
             register(models.flaky)
             register(models.hold)
+            register(models.interrupt)
             register(models.needskey)
             register(models.nostream)
             register(models.pair)

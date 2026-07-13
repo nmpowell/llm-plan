@@ -158,6 +158,31 @@ class TestParallelFailures:
         with pytest.raises(RuntimeError, match="transient upstream error"):
             runner.run()
 
+    def test_a_fatal_callback_error_cancels_queued_stages(self, tmp_path, fake_models):
+        # Two workers, one fast stage and four held ones: when logging the
+        # fast stage fails, the queued holds must be cancelled - draining
+        # them would bill every queued stage and block for their duration.
+        def failing_log(stage, response):
+            raise RuntimeError("logs.db is broken")
+
+        stages = [{"name": "fast", "summary": "s", "model": "echo", "prompt": "CLI"}] + [
+            {"name": f"held{i}", "summary": "s", "model": "hold", "prompt": "CLI"}
+            for i in range(4)
+        ]
+        runner = parallel_plan(tmp_path, stages, max_workers=2, on_response=failing_log)
+
+        start = time.monotonic()
+        try:
+            with pytest.raises(RuntimeError, match="logs.db is broken"):
+                runner.run()
+        finally:
+            fake_models.hold.release.set()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0, f"fatal error blocked {elapsed:.1f}s draining the queue"
+        # At most the in-flight holds ever started; the queued ones never ran.
+        assert fake_models.hold.calls <= 2
+
     def test_failed_dependency_skips_intolerant_dependents(self, tmp_path, fake_models):
         fake_models.flaky.failures_left = 99
         runner = parallel_plan(

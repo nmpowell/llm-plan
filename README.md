@@ -249,4 +249,5 @@ python -m pytest
 ```
 
 The test suite uses fake in-process models — no network calls, no API keys.
-Tested against llm 0.31 and 0.32.
+Tested against llm 0.31 and 0.32, on macOS and Linux (script-stage process
+management is POSIX-only; Windows is untested and unsupported).

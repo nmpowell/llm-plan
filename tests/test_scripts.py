@@ -207,6 +207,76 @@ class TestScriptSandbox:
         ), results["worker"].files
 
 
+# Writes its pid, signals readiness through a FIFO, then hangs.
+HANG_AFTER_RENDEZVOUS = """
+import os, sys, time
+open(sys.argv[1], "w").write(str(os.getpid()))
+open(sys.argv[2], "w").close()  # unblocks the test's FIFO reader
+time.sleep(8)
+"""
+
+
+def assert_pid_dies(pid, within=2.0):
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.01)
+    pytest.fail(f"script {pid} survived the abort")
+
+
+class TestScriptAbort:
+    def test_ctrl_c_kills_a_sequential_script(self, tmp_path, run_plan):
+        import signal
+        import threading
+
+        pid_file = tmp_path / "script.pid"
+        fifo = tmp_path / "ready.fifo"
+        os.mkfifo(fifo)
+        stage = script_stage(
+            tmp_path, HANG_AFTER_RENDEZVOUS, script_args=[str(pid_file), str(fifo)]
+        )
+
+        def interrupt_when_ready():
+            open(fifo).close()  # returns once the script opens its end
+            os.kill(os.getpid(), signal.SIGINT)
+
+        watcher = threading.Thread(target=interrupt_when_ready, daemon=True)
+        watcher.start()
+        with pytest.raises(KeyboardInterrupt):
+            run_plan([stage])
+        watcher.join(timeout=2)
+
+        assert_pid_dies(int(pid_file.read_text(encoding="utf-8")))
+
+    def test_an_aborting_parallel_run_kills_active_scripts(
+        self, tmp_path, fake_models, run_plan
+    ):
+        import threading
+
+        pid_file = tmp_path / "script.pid"
+        fifo = tmp_path / "ready.fifo"
+        os.mkfifo(fifo)
+        stages = [
+            script_stage(
+                tmp_path, HANG_AFTER_RENDEZVOUS, script_args=[str(pid_file), str(fifo)]
+            ),
+            {"name": "trip", "summary": "s", "model": "interrupt", "prompt": "CLI"},
+        ]
+
+        def release_when_ready():
+            open(fifo).close()
+            fake_models.interrupt.gate.set()
+
+        threading.Thread(target=release_when_ready, daemon=True).start()
+        with pytest.raises(KeyboardInterrupt):
+            run_plan(stages, CLIContext(instructions="go"), max_workers=2)
+
+        assert_pid_dies(int(pid_file.read_text(encoding="utf-8")))
+
+
 # Writes result.md, then blocks on a FIFO until the peer stage reaches the
 # same point - a cross-process barrier proving the two stages overlapped
 # while both had written the same filename.
