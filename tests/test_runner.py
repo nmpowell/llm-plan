@@ -152,6 +152,20 @@ class TestPromptComposition:
         assert "## MAIN INSTRUCTIONS" in text and "the guide" in text
         assert text.index("the context") < text.index("the guide")
 
+    def test_a_binary_context_file_fails_naming_the_stage_and_file(self, tmp_path, run_plan):
+        (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00\x01")
+        stages = [
+            {"name": "solo", "summary": "s", "model": "echo",
+             "prompt": "inline:Describe the input.",
+             "files": [{"path": "binary.bin"}]},
+        ]
+
+        runner, results = run_plan(stages, expect_error=True)
+
+        assert not results["solo"].success
+        assert "binary.bin" in results["solo"].error
+        assert "solo" in results["solo"].error
+
     def test_prompt_label_renames_the_first_prompt_file(self, tmp_path, run_plan):
         (tmp_path / "guide.md").write_text("the guide", encoding="utf-8")
         stages = [
@@ -298,6 +312,38 @@ class TestCliContextRouting:
         assert second_prompt.attachments == []
 
 
+class TestSeedRoutingWarnings:
+    def test_warns_when_no_stage_will_receive_cli_files(self, tmp_path, run_plan):
+        messages = []
+        stages = [
+            {"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"},
+        ]
+        cli = CLIContext(instructions="hi", fragments=["seed fragment text"])
+
+        run_plan(stages, cli, progress=messages.append)
+
+        assert any("no stage requests CLI input" in m for m in messages), messages
+
+    def test_no_warning_when_a_stage_receives_cli_files(self, tmp_path, run_plan):
+        messages = []
+        stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
+        cli = CLIContext(instructions="hi", fragments=["seed fragment text"])
+
+        run_plan(stages, cli, progress=messages.append)
+
+        assert not any("no stage requests CLI input" in m for m in messages)
+
+    def test_no_warning_when_only_instructions_were_provided(self, tmp_path, run_plan):
+        messages = []
+        stages = [
+            {"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"},
+        ]
+
+        run_plan(stages, CLIContext(instructions="hi"), progress=messages.append)
+
+        assert not any("no stage requests CLI input" in m for m in messages)
+
+
 class TestModelsAndOptions:
     def test_each_stage_uses_its_own_model(self, tmp_path, fake_models, run_plan):
         stages = [
@@ -322,6 +368,23 @@ class TestModelsAndOptions:
         assert results["a"].text.startswith("OTHER[")
         assert results["b"].text.startswith("OTHER[")
 
+    def test_invalid_options_are_reported_without_pydantic_boilerplate(
+        self, tmp_path, run_plan
+    ):
+        stage = {
+            "name": "solo",
+            "summary": "s",
+            "model": "echo",
+            "prompt": "CLI",
+            "options": {"nonsense_option": 1},
+        }
+
+        runner, results = run_plan([stage], CLIContext(instructions="hi"), expect_error=True)
+
+        error = results["solo"].error
+        assert "nonsense_option" in error
+        assert "errors.pydantic.dev" not in error
+
     def test_cli_options_override_stage_options(self, tmp_path, fake_models, run_plan):
         stages = [
             {"name": "a", "summary": "s", "model": "echo", "prompt": "CLI",
@@ -345,6 +408,15 @@ class TestFailureHandling:
 
         assert results["solo"].success
         assert fake_models.flaky.calls == 3
+
+    def test_a_missing_api_key_fails_the_stage_without_retrying(self, tmp_path, fake_models, run_plan):
+        stages = [{"name": "solo", "summary": "s", "model": "needskey", "prompt": "CLI"}]
+
+        runner, results = run_plan(stages, CLIContext(instructions="hi"), expect_error=True)
+
+        assert not results["solo"].success
+        assert "key" in results["solo"].error.lower()
+        assert fake_models.needskey.calls == 1
 
     def test_failure_after_retries_exhausted_fails_the_stage(self, tmp_path, fake_models, run_plan):
         fake_models.flaky.failures_left = 10
@@ -415,6 +487,18 @@ class TestFailureHandling:
         assert results["rescue"].success
         assert results["rescue"].text == "ECHO[hi]"
 
+    def test_llm_raise_errors_env_reraises_the_original_exception(
+        self, tmp_path, fake_models, monkeypatch, run_plan
+    ):
+        monkeypatch.setenv("LLM_RAISE_ERRORS", "1")
+        fake_models.flaky.failures_left = 10
+        stages = [{"name": "solo", "summary": "s", "model": "flaky", "prompt": "CLI"}]
+
+        with pytest.raises(RuntimeError, match="transient upstream error"):
+            run_plan(stages, CLIContext(instructions="hi"))
+
+        assert fake_models.flaky.calls == 1
+
     def test_sequential_failure_aborts_before_later_stages_spend_money(
         self, tmp_path, fake_models
     ):
@@ -474,4 +558,29 @@ class TestLoadPlan:
         )
 
         with pytest.raises(PlanError, match="cli.nonsense"):
+            load_plan(plan_file)
+
+    def test_load_plan_rejects_unknown_runtime_variables_in_env_values(self, tmp_path):
+        script = tmp_path / "s.py"
+        script.write_text("", encoding="utf-8")
+        plan_file = write_plan(
+            tmp_path,
+            [{"name": "a", "summary": "s", "type": "python_script", "script": "s.py",
+              "env": {"CUSTOM_VAR": "${cli.bogus}"}}],
+        )
+
+        with pytest.raises(PlanError, match="cli.bogus"):
+            load_plan(plan_file)
+
+    @pytest.mark.parametrize("prompt", [
+        "inline:Write results into ${run.output_dir}",
+        [{"prompt": "inline:Run ${cli.run_id}", "label": "Task"}],
+    ], ids=["scalar", "list"])
+    def test_load_plan_rejects_runtime_tokens_in_llm_prompts(self, tmp_path, prompt):
+        plan_file = write_plan(
+            tmp_path,
+            [{"name": "a", "summary": "s", "model": "echo", "prompt": prompt}],
+        )
+
+        with pytest.raises(PlanError, match="prompt"):
             load_plan(plan_file)

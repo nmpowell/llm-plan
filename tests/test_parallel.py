@@ -1,9 +1,12 @@
+import time
+
+import pytest
 import yaml
 
 from llm_plan.runner import CLIContext, PlanRunner, load_plan
 
 
-def parallel_plan(tmp_path, stages, max_workers=4):
+def parallel_plan(tmp_path, stages, max_workers=4, **runner_kwargs):
     data = {
         "name": "test",
         "summary": "a parallel test plan",
@@ -13,7 +16,11 @@ def parallel_plan(tmp_path, stages, max_workers=4):
     plan_file = tmp_path / "plan.yaml"
     plan_file.write_text(yaml.safe_dump(data), encoding="utf-8")
     return PlanRunner(
-        load_plan(plan_file), CLIContext(instructions="go"), retry_delay=0, retries=0
+        load_plan(plan_file),
+        CLIContext(instructions="go"),
+        retry_delay=0,
+        retries=0,
+        **runner_kwargs,
     )
 
 
@@ -99,7 +106,58 @@ class TestExclusive:
             )
 
 
+class TestKeyboardInterrupt:
+    def test_ctrl_c_abandons_in_flight_stages_and_never_starts_pending_ones(
+        self, tmp_path, fake_models
+    ):
+        # The progress callback runs on the coordinating thread, so raising
+        # from it lands the interrupt inside the scheduling loop while the
+        # "first" stage is deterministically still in flight.
+        def interrupt_at_second_stage(message):
+            if message.startswith("Stage") and "second" in message:
+                raise KeyboardInterrupt
+
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "first", "summary": "s", "model": "hold", "prompt": "CLI"},
+                {"name": "second", "summary": "s", "model": "echo", "prompt": "CLI"},
+                {"name": "third", "summary": "s", "model": "echo", "prompt": "CLI"},
+            ],
+            progress=interrupt_at_second_stage,
+        )
+
+        start = time.monotonic()
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                runner.run()
+        finally:
+            fake_models.hold.release.set()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0, f"ctrl-C blocked for {elapsed:.1f}s on in-flight stages"
+        assert fake_models.echo.prompts == []
+        assert "second" not in runner.results
+        assert "third" not in runner.results
+
+
 class TestParallelFailures:
+    def test_llm_raise_errors_env_propagates_from_worker_threads(
+        self, tmp_path, fake_models, monkeypatch
+    ):
+        monkeypatch.setenv("LLM_RAISE_ERRORS", "1")
+        fake_models.flaky.failures_left = 10
+        runner = parallel_plan(
+            tmp_path,
+            [
+                {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
+                {"name": "fine", "summary": "s", "model": "echo", "prompt": "CLI"},
+            ],
+        )
+
+        with pytest.raises(RuntimeError, match="transient upstream error"):
+            runner.run()
+
     def test_failed_dependency_skips_intolerant_dependents(self, tmp_path, fake_models):
         fake_models.flaky.failures_left = 99
         runner = parallel_plan(

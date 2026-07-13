@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
 import subprocess
 import tempfile
 import threading
@@ -150,6 +151,7 @@ class PlanRunner:
 
     def run(self) -> list[StageResult]:
         """Execute every stage; results in listed-stage order."""
+        self._warn_unrouted_cli_input()
         if self.plan.max_workers > 1 and len(self.plan.stages) > 1:
             self._run_parallel()
         else:
@@ -158,6 +160,23 @@ class PlanRunner:
 
     def leaf_stages(self) -> list[str]:
         return leaf_stages(self.plan.stages)
+
+    def _warn_unrouted_cli_input(self) -> None:
+        """Warn when -f/-a/--cf input was given but no stage will receive it."""
+        if not (self.cli.files or self.cli.fragments or self.cli.attachments):
+            return
+        stages = self.plan.stages
+        for index, stage in enumerate(stages):
+            deps = resolve_dependencies(stage, index, stages)
+            wants = self._wants_cli_files(
+                stage, index, deps, prompt_wants_files=prompt_wants_cli_files(stage.prompt)
+            )
+            if wants:
+                return
+        self.progress(
+            "  warning: -f/-a/--cf input provided but no stage requests CLI input "
+            "(use prompt CLI, CLI:files or CLI:all, or depends_on: [seed])"
+        )
 
     # -- scheduling -----------------------------------------------------------
 
@@ -219,7 +238,9 @@ class PlanRunner:
                     ready.append(dependent)
             ready.sort(key=lambda s: position[s.name])
 
-        with ThreadPoolExecutor(max_workers=self.plan.max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=self.plan.max_workers)
+        interrupted = False
+        try:
             while ready or running:
                 while ready:
                     if running and any(s.exclusive for s in running.values()):
@@ -250,6 +271,13 @@ class PlanRunner:
                     result, response = future.result()
                     self._finish(stage, result, response, failed)
                     release(stage)
+        except KeyboardInterrupt:
+            interrupted = True
+            raise
+        finally:
+            # Ctrl-C must not block on in-flight stages: abandon them and
+            # cancel anything queued. Every other exit drains the pool.
+            executor.shutdown(wait=not interrupted, cancel_futures=interrupted)
 
     def _skip_for_failed_deps(self, stage: Stage, deps: list[str], failed: set[str]) -> bool:
         failed_deps = [d for d in deps if d in failed]
@@ -293,14 +321,18 @@ class PlanRunner:
     def _run_stage(self, stage: Stage, index: int, deps: list[str], failed: set[str]):
         """Execute one stage; returns (StageResult, llm response or None).
 
-        Runs on worker threads in parallel mode, so it must never raise:
-        anything unexpected becomes a failed StageResult.
+        Runs on worker threads in parallel mode, so it never raises -
+        anything unexpected becomes a failed StageResult - except when
+        ``LLM_RAISE_ERRORS`` is set (llm's debugging convention), which
+        re-raises the original exception for the scheduler to surface.
         """
         try:
             if stage.type == "python_script":
-                return self._run_script_stage(stage, deps, failed), None
+                return self._run_script_stage(stage, index, deps, failed), None
             return self._run_llm_stage(stage, index, deps, failed)
         except Exception as exc:
+            if os.environ.get("LLM_RAISE_ERRORS"):
+                raise
             return StageResult(
                 name=stage.name,
                 success=False,
@@ -343,7 +375,11 @@ class PlanRunner:
                 )
                 text = response.text()
             except Exception as exc:
+                if os.environ.get("LLM_RAISE_ERRORS"):
+                    raise  # llm's debugging convention: surface the original
                 last_error = str(exc) or type(exc).__name__
+                if isinstance(exc, llm.NeedsKeyException):
+                    break  # a missing key never fixes itself mid-run
                 continue
             return StageResult(
                 name=stage.name,
@@ -360,7 +396,9 @@ class PlanRunner:
             error=last_error,
         ), None
 
-    def _run_script_stage(self, stage: Stage, deps: list[str], failed: set[str]) -> StageResult:
+    def _run_script_stage(
+        self, stage: Stage, index: int, deps: list[str], failed: set[str]
+    ) -> StageResult:
         start = time.monotonic()
 
         def failure(error: str) -> StageResult:
@@ -371,7 +409,7 @@ class PlanRunner:
                 error=error,
             )
 
-        scratch = self._scratch()
+        scratch = self._stage_scratch(stage)
         runtime = {
             "cli": {"instructions": self.cli.instructions_text, "run_id": self.run_id},
             "run": {"output_dir": str(scratch), "stage_name": stage.name},
@@ -383,10 +421,13 @@ class PlanRunner:
             args = [
                 script_stage.substitute_runtime(str(a), runtime) for a in stage.script_args
             ]
+            stage_env = {
+                str(key): script_stage.substitute_runtime(str(value), runtime)
+                for key, value in stage.env.items()
+            }
         except PlanError as exc:
             return failure(str(exc))
 
-        index = next(i for i, s in enumerate(self.plan.stages) if s.name == stage.name)
         input_files = self._script_input_files(stage, index, deps, failed, scratch)
         command = [stage.python, str(stage.resolved_script)]
         command += plan_args + args + [str(path) for path in input_files]
@@ -397,32 +438,45 @@ class PlanRunner:
             script_stage.ENV_OUTPUT_DIR: str(scratch),
             script_stage.ENV_RUN_ID: self.run_id,
             script_stage.ENV_STAGE_NAME: stage.name,
-            **{str(key): str(value) for key, value in stage.env.items()},
+            **stage_env,
         }
         timeout = stage.timeout or DEFAULT_SCRIPT_TIMEOUT
 
         try:
-            process = subprocess.run(
+            # Its own session so a timeout can kill the whole process group:
+            # grandchildren would otherwise outlive the stage and hold the
+            # inherited pipes open. Stdout is a path/manifest protocol, so
+            # decode it as UTF-8 like the file reads below, not the locale.
+            process = subprocess.Popen(
                 command,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding="utf-8",
+                errors="replace",
                 env=env,
+                start_new_session=True,
             )
-        except subprocess.TimeoutExpired:
-            return failure(f"script timeout: exceeded {timeout}s")
         except OSError as exc:
             return failure(f"could not run script: {exc}")
 
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(process)
+            _, stderr = process.communicate()
+            error = f"script timeout: exceeded {timeout}s"
+            if stderr.strip():
+                error += f"\n{stderr.strip()[-2000:]}"
+            return failure(error)
+
         if process.returncode != 0:
             error = f"script exited with code {process.returncode}"
-            if process.stderr:
-                error += f"\n{process.stderr.strip()[-2000:]}"
+            if stderr:
+                error += f"\n{stderr.strip()[-2000:]}"
             return failure(error)
 
         try:
-            manifest = script_stage.parse_manifest(process.stdout)
+            manifest = script_stage.parse_manifest(stdout)
         except PlanError as exc:
             return failure(str(exc))
         if manifest is not None:
@@ -430,7 +484,7 @@ class PlanRunner:
         else:
             files = [
                 Path(line.strip())
-                for line in process.stdout.splitlines()
+                for line in stdout.splitlines()
                 if line.strip()
             ]
         if not files:
@@ -464,7 +518,7 @@ class PlanRunner:
         Dependency outputs first (LLM text materialised to disk), then the
         stage's own ``files:``, then routed CLI seed files - a file-backed
         fragment contributes its original path, any other fragment is written
-        into the scratch directory.
+        into the stage's scratch directory.
         """
         paths: list[Path] = []
         for dep in deps:
@@ -495,7 +549,7 @@ class PlanRunner:
         return paths
 
     def _scratch(self) -> Path:
-        """A per-run scratch directory for script outputs (kept for inspection)."""
+        """The run's scratch root (kept for inspection); one subdirectory per stage."""
         with self._scratch_lock:
             if self._scratch_dir is None:
                 self._scratch_dir = Path(
@@ -503,6 +557,18 @@ class PlanRunner:
                 )
                 self.progress(f"  scratch directory: {self._scratch_dir}")
             return self._scratch_dir
+
+    def _stage_scratch(self, stage: Stage) -> Path:
+        """A stage's own scratch directory, for its inputs and outputs.
+
+        Stages sharing one directory would collide: parallel stages that
+        consume the same dependency truncate-and-rewrite the same
+        materialised input, and scripts writing the same output filename
+        overwrite each other.
+        """
+        path = self._scratch() / stage.name
+        path.mkdir(exist_ok=True)
+        return path
 
     # -- prompt preparation ---------------------------------------------------
 
@@ -628,9 +694,29 @@ class PlanRunner:
             except pydantic.ValidationError as exc:
                 raise PlanError(
                     f"Stage '{stage.name}': invalid options for model "
-                    f"'{model.model_id}': {exc}"
+                    f"'{model.model_id}': {_render_validation_error(exc)}"
                 ) from exc
         return merged
+
+
+def _render_validation_error(exc: pydantic.ValidationError) -> str:
+    """Format option errors the way llm's own CLI renders them."""
+    try:
+        from llm.cli import render_errors
+    except ImportError:
+        return str(exc)
+    return render_errors(exc.errors())
+
+
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """Kill a timed-out script and everything it spawned.
+
+    The script runs as its own session leader, so its pid is the group id.
+    """
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:  # every group member already exited
+        pass
 
 
 def _render_section(label: str, body: str, *, fenced: bool) -> str:
@@ -642,5 +728,5 @@ def _render_section(label: str, body: str, *, fenced: bool) -> str:
 def _read(path: Path, stage_name: str) -> str:
     try:
         return path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise PlanError(f"Stage '{stage_name}': could not read {path}: {exc}") from exc

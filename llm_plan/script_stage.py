@@ -11,8 +11,10 @@ A script stage's contract with the plan runner:
   "metadata": {...}}``. Everything else (progress, logs) goes to stderr;
   exit 0 on success.
 
-``${cli.*}``/``${run.*}`` tokens in ``script_args`` and ``--plan-arg`` values
-are substituted at execution time; see ``RUNTIME_VAR_SPEC``.
+``${cli.*}``/``${run.*}`` tokens in ``script_args``, ``env`` values and
+``--plan-arg`` values are substituted at execution time (see
+``RUNTIME_VAR_SPEC``); in LLM-stage prompts they can never be substituted,
+so plan loading rejects them.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ ENV_OUTPUT_DIR = "LLM_PLAN_OUTPUT_DIR"
 ENV_RUN_ID = "LLM_PLAN_RUN_ID"
 ENV_STAGE_NAME = "LLM_PLAN_STAGE_NAME"
 
-# Runtime variables available in script_args / --plan-arg values.
+# Runtime variables available in script_args, env values and --plan-arg values.
 RUNTIME_VAR_SPEC: dict[str, frozenset[str]] = {
     "cli": frozenset({"instructions", "run_id"}),
     "run": frozenset({"output_dir", "stage_name"}),
@@ -41,26 +43,50 @@ _RUNTIME_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 
 def validate_runtime_vars(stages: list[Stage]) -> None:
-    """Reject unknown ``${...}`` tokens in script_args at load time.
+    """Reject unknown ``${...}`` tokens in script_args and env at load time.
 
     Runs after the load-time variable pass, so the only tokens left are the
     deferred runtime ones; this catches typos before any stage spends money.
     """
-    valid = ", ".join(
-        f"{ns}.{key}" for ns, keys in RUNTIME_VAR_SPEC.items() for key in sorted(keys)
-    )
     for stage in stages:
-        for arg in stage.script_args:
-            if not isinstance(arg, str):
+        for value in list(stage.script_args) + list(stage.env.values()):
+            if not isinstance(value, str):
                 continue
-            for token in _RUNTIME_VAR_RE.findall(arg):
+            for token in _RUNTIME_VAR_RE.findall(value):
                 parts = token.split(".")
                 allowed = RUNTIME_VAR_SPEC.get(parts[0])
                 if allowed is None or len(parts) != 2 or parts[1] not in allowed:
+                    valid = ", ".join(
+                        f"{ns}.{key}"
+                        for ns, keys in RUNTIME_VAR_SPEC.items()
+                        for key in sorted(keys)
+                    )
                     raise PlanError(
                         f"Stage '{stage.name}': unknown runtime variable "
                         f"'${{{token}}}'. Valid runtime variables: {valid}"
                     )
+        if stage.type == "python_script":
+            continue
+        for text in _prompt_strings(stage.prompt):
+            for token in _RUNTIME_VAR_RE.findall(text):
+                if token.split(".")[0] in RUNTIME_VAR_SPEC:
+                    raise PlanError(
+                        f"Stage '{stage.name}': runtime variable '${{{token}}}' "
+                        f"in a prompt would be sent to the model verbatim; "
+                        f"runtime variables are only substituted in script_args, "
+                        f"env values and --plan-arg values"
+                    )
+
+
+def _prompt_strings(prompt) -> list[str]:
+    """Every prompt string in a scalar-or-list prompt spec."""
+    items = prompt if isinstance(prompt, list) else [prompt]
+    texts = []
+    for item in items:
+        text = item.get("prompt", "") if isinstance(item, dict) else item
+        if isinstance(text, str):
+            texts.append(text)
+    return texts
 
 
 def substitute_runtime(value: str, runtime: dict) -> str:
@@ -143,7 +169,7 @@ def read_instructions() -> str:
 
 
 def output_dir() -> Path | None:
-    """The run's scratch directory, if the plan runner forwarded one."""
+    """The stage's own scratch directory, if the plan runner forwarded one."""
     value = os.environ.get(ENV_OUTPUT_DIR)
     return Path(value) if value else None
 

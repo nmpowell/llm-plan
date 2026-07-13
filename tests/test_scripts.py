@@ -1,5 +1,7 @@
 import json
+import os
 import textwrap
+import time
 
 import llm
 import pytest
@@ -103,6 +105,72 @@ class TestScriptExecution:
         assert not results["worker"].success
         assert "timeout" in results["worker"].error.lower()
 
+    def test_timeout_kills_the_scripts_whole_process_group_promptly(self, tmp_path, run_plan):
+        # The grandchild inherits the stdout pipe: unless the whole group is
+        # killed it outlives the stage and can block the runner's pipe reads.
+        body = """
+        import subprocess, sys, time
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(8)"])
+        open(sys.argv[1], "w").write(str(child.pid))
+        time.sleep(8)
+        """
+        pid_file = tmp_path / "child.pid"
+        stage = script_stage(tmp_path, body, timeout=1, script_args=[str(pid_file)])
+
+        start = time.monotonic()
+        runner, results = run_plan([stage], expect_error=True)
+        elapsed = time.monotonic() - start
+
+        assert "timeout" in results["worker"].error.lower()
+        assert elapsed < 4, f"runner blocked for {elapsed:.1f}s after a 1s timeout"
+        grandchild = int(pid_file.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                break
+        else:
+            pytest.fail(f"grandchild {grandchild} outlived the stage timeout")
+
+    def test_timeout_error_includes_the_scripts_stderr_tail(self, tmp_path, run_plan):
+        body = """
+        import sys, time
+        print("about to hang", file=sys.stderr, flush=True)
+        time.sleep(8)
+        """
+        stage = script_stage(tmp_path, body, timeout=1)
+
+        runner, results = run_plan([stage], expect_error=True)
+
+        assert "timeout" in results["worker"].error.lower()
+        assert "about to hang" in results["worker"].error
+
+    def test_undecodable_stderr_still_reports_the_exit_code(self, tmp_path, run_plan):
+        body = """
+        import sys
+        sys.stderr.buffer.write(b"diagnostic \\xff\\xfe tail\\n")
+        sys.exit(3)
+        """
+
+        runner, results = run_plan([script_stage(tmp_path, body)], expect_error=True)
+
+        assert "exited with code 3" in results["worker"].error
+        assert "diagnostic" in results["worker"].error
+
+    def test_non_ascii_output_paths_are_decoded_as_utf8(self, tmp_path, run_plan):
+        body = """
+        import os
+        out = os.path.join(os.environ["LLM_PLAN_OUTPUT_DIR"], "r\\u00e9sum\\u00e9.md")
+        open(out, "w", encoding="utf-8").write("accented filename body")
+        print(out)
+        """
+
+        runner, results = run_plan([script_stage(tmp_path, body)])
+
+        assert results["worker"].success, results["worker"].error
+        assert results["worker"].text == "accented filename body"
+
     @pytest.mark.parametrize("stdout_line", [
         '{"outputs": null}',
         '{"outputs": {"path": "x"}}',
@@ -139,6 +207,64 @@ class TestScriptSandbox:
         ), results["worker"].files
 
 
+# Writes result.md, then blocks on a FIFO until the peer stage reaches the
+# same point - a cross-process barrier proving the two stages overlapped
+# while both had written the same filename.
+RENDEZVOUS_WRITER = """
+import os, sys
+out = os.path.join(os.environ["LLM_PLAN_OUTPUT_DIR"], "result.md")
+with open(out, "w", encoding="utf-8") as handle:
+    handle.write("written by " + os.environ["LLM_PLAN_STAGE_NAME"])
+fifo, mode = sys.argv[1], sys.argv[2]
+with open(fifo, mode):
+    pass
+print(out)
+"""
+
+
+class TestScriptScratchIsolation:
+    def test_overlapping_scripts_writing_the_same_filename_get_distinct_files(
+        self, tmp_path, run_plan
+    ):
+        fifo = tmp_path / "rendezvous"
+        os.mkfifo(fifo)
+        stages = [
+            script_stage(tmp_path, RENDEZVOUS_WRITER, name="left",
+                         script_name="left.py", timeout=5,
+                         depends_on=["seed"], script_args=[str(fifo), "w"]),
+            script_stage(tmp_path, RENDEZVOUS_WRITER, name="right",
+                         script_name="right.py", timeout=5,
+                         depends_on=["seed"], script_args=[str(fifo), "r"]),
+        ]
+
+        runner, results = run_plan(stages, max_workers=4)
+
+        left, right = results["left"], results["right"]
+        assert left.success, left.error
+        assert right.success, right.error
+        assert left.files[0] != right.files[0]
+        assert left.files[0].read_text(encoding="utf-8") == "written by left"
+        assert right.files[0].read_text(encoding="utf-8") == "written by right"
+
+    def test_stages_sharing_a_dependency_each_get_their_own_materialised_copy(
+        self, tmp_path, run_plan
+    ):
+        stages = [
+            {"name": "thinker", "summary": "s", "model": "echo", "prompt": "CLI"},
+            script_stage(tmp_path, RECORDER_SCRIPT, name="left",
+                         script_name="left.py", depends_on=["thinker"]),
+            script_stage(tmp_path, RECORDER_SCRIPT, name="right",
+                         script_name="right.py", depends_on=["thinker"]),
+        ]
+
+        runner, results = run_plan(stages, CLIContext(instructions="hi"))
+
+        left = json.loads(results["left"].text)
+        right = json.loads(results["right"].text)
+        assert left["inputs"] == right["inputs"] == ["ECHO[hi]"]
+        assert left["argv"][0] != right["argv"][0]
+
+
 class TestScriptInputs:
     def test_env_plan_args_and_runtime_vars_reach_the_script(self, tmp_path, run_plan):
         stage = script_stage(
@@ -157,6 +283,18 @@ class TestScriptInputs:
         assert record["stage"] == "worker"
         assert record["run_id"] == runner.run_id
         assert record["custom"] == "custom-value"
+
+    def test_runtime_tokens_in_env_values_reach_the_script_substituted(self, tmp_path, run_plan):
+        stage = script_stage(
+            tmp_path,
+            RECORDER_SCRIPT,
+            env={"CUSTOM_VAR": "stage=${run.stage_name}"},
+        )
+
+        runner, results = run_plan([stage])
+
+        record = json.loads(results["worker"].text)
+        assert record["custom"] == "stage=worker"
 
     def test_llm_dependency_text_arrives_as_a_file_argument(self, tmp_path, run_plan):
         stages = [

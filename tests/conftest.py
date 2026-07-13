@@ -131,6 +131,34 @@ class NonStreamingModel(llm.Model):
         return ["NOSTREAM-OK"]
 
 
+class HoldModel(llm.Model):
+    """Blocks until released (bounded), to hold a stage in flight."""
+
+    model_id = "hold"
+    can_stream = True
+
+    def __init__(self):
+        self.release = threading.Event()
+
+    def execute(self, prompt, stream, response, conversation):
+        self.release.wait(timeout=2)
+        yield "HELD"
+
+
+class NeedsKeyModel(llm.Model):
+    """Raises NeedsKeyException, like a provider model with no API key."""
+
+    model_id = "needskey"
+    can_stream = True
+
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, prompt, stream, response, conversation):
+        self.calls += 1
+        raise llm.NeedsKeyException("No key found for model 'needskey'")
+
+
 class PairModel(llm.Model):
     """Succeeds only when two executions overlap in time."""
 
@@ -174,6 +202,8 @@ def fake_models():
         echo=EchoModel(),
         other=EchoModel(model_id="other"),
         flaky=FlakyModel(),
+        hold=HoldModel(),
+        needskey=NeedsKeyModel(),
         nostream=NonStreamingModel(),
         pair=PairModel(),
         timing=TimingModel(),
@@ -187,6 +217,8 @@ def fake_models():
             register(models.echo)
             register(models.other)
             register(models.flaky)
+            register(models.hold)
+            register(models.needskey)
             register(models.nostream)
             register(models.pair)
             register(models.timing)
