@@ -69,9 +69,10 @@ Options for `run`:
   `github:owner/repo`. Resolved exactly like `llm prompt -f`.
 - `--cf/--context-file PATH LABEL` — a labelled seed file, included as a
   fenced `## LABEL` section (repeatable).
-- `-a/--attachment PATH_OR_URL` — seed attachments (images etc.).
+- `-a/--attachment PATH_OR_URL` — seed attachments (images etc.); accepts `-`
+  for stdin and validates paths and URLs up front, exactly like `llm prompt -a`.
 - `-m/--model MODEL` — override the model for **every** LLM stage (handy for
-  a cheap end-to-end check: `-m haiku-4.5`).
+  a cheap end-to-end check: `-m haiku-4.5`). Honours `$LLM_MODEL`.
 - `-o/--option KEY VALUE` — model option applied to every LLM stage. Merge
   order per stage: `llm models options` defaults < the stage's `options:` <
   `-o`.
@@ -80,7 +81,7 @@ Options for `run`:
 - `--retries N` — retries per LLM stage after a failure (default 2).
 - `-n/--no-log` / `--log` / `-d/--database PATH` — logging control, exactly
   as `llm prompt`.
-- `-q/--quiet` — suppress stage progress on stderr.
+- `--quiet` — suppress stage progress on stderr.
 
 The exit code is non-zero unless every *leaf* stage (one nothing depends on)
 succeeded. When several leaves succeed, each prints under a `## <stage>`
@@ -137,7 +138,7 @@ llm plan review "Should we adopt feature flags?" -f design.md
 |:---|:---|
 | `name`, `summary` | Required. `summary` shows in progress output and `--explain` |
 | `type` | `llm` (default) or `python_script` |
-| `model` | Required for LLM stages; any model ID or alias LLM resolves |
+| `model` | Any model ID or alias LLM resolves; omit to use `llm models default` |
 | `prompt` | Prompt spec — see grammar below |
 | `prompt_label` | Relabels the first prompt-*file* section |
 | `produces` | Heading this stage's output gets when chained downstream |
@@ -164,13 +165,20 @@ composed in order:
   explicitly.
 - `inline:Some literal text` — quote it (`"inline:..."`); YAML parses a bare
   `prompt: inline: x` as a mapping.
-- `chain:stage_name` — a completed stage's output text, verbatim.
+- `chain:stage_name` — a completed stage's output text, verbatim. The named
+  stage automatically becomes a dependency, and its text appears only where
+  the `chain:` item places it (no duplicate auto-fenced copy).
 - anything else — a file path, resolved against the plan's directory.
 
 Sections compose with `## <label>` headings separated by `---` rules:
 stage `files:` first, then dependency outputs (headed by their `produces`),
 then prompt files (default heading `MAIN INSTRUCTIONS`), then
 inline/chain/CLI parts in listed order.
+
+Plans are validated fully before anything runs — missing prompt files,
+unknown stage keys (with a did-you-mean), malformed `depends_on`, undefined
+`${variables}` and forward `chain:` references all fail at load, before any
+stage spends money.
 
 ### Script stages
 
@@ -189,17 +197,19 @@ The contract:
 
 - **argv**: `--plan-arg` values, then `script_args`, then each dependency
   output as a file path (an LLM dependency's text is first written to
-  `<stage>.md` in the run's scratch directory).
-- **environment**: `LLM_PLAN_INSTRUCTIONS`, `LLM_PLAN_OUTPUT_DIR` (a per-run
-  scratch directory), `LLM_PLAN_RUN_ID` and `LLM_PLAN_STAGE_NAME`, plus the
-  stage's `env:`.
+  `<stage>.md` in the stage's scratch directory).
+- **environment**: `LLM_PLAN_INSTRUCTIONS`, `LLM_PLAN_OUTPUT_DIR` (the
+  stage's own scratch directory — stages never share one), `LLM_PLAN_RUN_ID`
+  and `LLM_PLAN_STAGE_NAME`, plus the stage's `env:`.
 - **stdout**: one produced-file path per line, or a JSON manifest
   `{"outputs": [{"path": "...", "label": "..."}, ...]}` — manifest labels
   become section headings when the files chain into an LLM stage. Everything
-  else belongs on stderr. Exit 0 on success.
+  else belongs on stderr. Exit 0 on success. A `timeout` kills the script's
+  whole process group.
 - `${cli.instructions}`, `${cli.run_id}`, `${run.output_dir}` and
-  `${run.stage_name}` are substituted into `script_args` and `--plan-arg`
-  values at execution time.
+  `${run.stage_name}` are substituted into `script_args`, `env:` values and
+  `--plan-arg` values at execution time (never into LLM prompts, where they
+  are rejected at load).
 
 `llm_plan.script_stage` offers helpers for script authors
 (`read_instructions()`, `output_dir()`, `emit_outputs()`).
@@ -207,24 +217,27 @@ The contract:
 ### Shared definitions
 
 `extends: "_defaults.yaml"` deep-merges another YAML file underneath the plan
-(the plan wins). Every other top-level mapping — `models:`, `prompts:`,
-`files:`, anything you like — becomes a `${name.key}` variable table for the
-whole document. Files starting with `_` are hidden from `llm plan list`.
+(the plan wins), recursively — a base file may extend another. Every other
+top-level mapping — `models:`, `prompts:`, `files:`, anything you like —
+becomes a `${name.key}` variable table for the whole document. Files starting
+with `_` are hidden from `llm plan list`.
 
 ## Logging and prior runs
 
 Every stage's prompt and response is logged to LLM's `logs.db` under the same
-rules as `llm prompt` (`-n/--no-log`, `--log`, the `llm logs off` sentinel).
-That is the durable record of a run:
+rules as `llm prompt` (`-n/--no-log`, `--log`, the `llm logs off` sentinel),
+and a run's responses share one conversation whose id is the run id printed
+on stderr — so one command retrieves the whole run. A failure to log fails
+the command: the log is a promise, not best-effort.
 
 ```bash
-llm logs -n 5                  # the plan's responses, most recent first
+llm logs --cid RUN_ID          # every stage of one run
 llm logs -r | llm plan review "critique this"   # feed a response back in
 llm plan synthesis_full "..." > answer.md        # stdout is the final answer
 ```
 
-Script stages write real files into a per-run scratch directory (its path is
-printed on stderr and kept after the run).
+Script stages write real files into per-stage scratch directories under a
+per-run root (its path is printed on stderr and kept after the run).
 
 ## Development
 
