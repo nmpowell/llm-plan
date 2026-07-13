@@ -649,8 +649,13 @@ class PlanRunner:
         spec_parts = [(label, text) for label, text in spec.sections if text.strip()]
 
         if not rendered and not any(label for label, _ in spec_parts):
-            # The whole prompt is plain instruction text: keep it raw.
-            prompt_text = "\n\n".join(text.strip() for _, text in spec_parts)
+            # The whole prompt is plain instruction text: keep it raw. A
+            # single part passes through untouched (piped code keeps its
+            # indentation, like llm prompt); only joins are tidied.
+            if len(spec_parts) == 1:
+                prompt_text = spec_parts[0][1]
+            else:
+                prompt_text = "\n\n".join(text.strip() for _, text in spec_parts)
         else:
             # Each part keeps its listed position; label-less parts sit under
             # their own "Additional Instructions" heading.

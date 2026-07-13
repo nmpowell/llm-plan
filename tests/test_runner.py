@@ -274,6 +274,14 @@ class TestGoldenComposition:
 
         assert fake_models.echo.prompts[0].prompt == "just the question"
 
+    def test_a_lone_cli_prompt_keeps_its_whitespace(self, tmp_path, fake_models, run_plan):
+        piped_code = "    def f():\n        return 1\n"
+
+        stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
+        run_plan(stages, CLIContext(instructions=piped_code))
+
+        assert fake_models.echo.prompts[0].prompt == piped_code
+
 
 class TestCliContextRouting:
     def test_fragments_reach_cli_stages_but_not_downstream_stages(self, tmp_path, fake_models, run_plan):
