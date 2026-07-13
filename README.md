@@ -93,10 +93,10 @@ name: "review"
 summary: "Two analysts in parallel, then a synthesis"
 
 parallel_config:
-  max_workers: 4          # omit (or 1) for sequential execution
+  max_workers: 4          # omit (or 1) for sequential execution, if possible
 
 models:                   # any top-level mapping becomes a ${variable} table
-  strong: claude-opus-4.5 # values pass straight to llm's model resolution
+  strong: claude-opus-4.8 # values pass straight to llm's model resolution
 
 stages:
   - name: "analyst"
@@ -107,7 +107,7 @@ stages:
 
   - name: "skeptic"
     summary: "Hunt for weaknesses"
-    model: "gpt-5.5"
+    model: "gpt-5.6"
     prompt:
       - "CLI"
       - "inline:Act as a sceptical reviewer. List the strongest objections."
@@ -117,7 +117,7 @@ stages:
     summary: "Reconcile both views"
     model: "${models.strong}"
     depends_on: [analyst, skeptic]
-    partial_dependencies: true    # run even if one analyst failed
+    partial_dependencies: true    # run even if some dependencies failed
     prompt:
       - prompt: "CLI:instructions"
         label: "Original Question"
