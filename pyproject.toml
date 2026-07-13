@@ -1,0 +1,47 @@
+[project]
+name = "llm-plan"
+version = "0.1"
+description = "Run multi-stage LLM workflows: DAGs of prompts and scripts with automatic output chaining"
+readme = "README.md"
+authors = [{name = "Nick Powell"}]
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "llm>=0.31",
+    "click",
+    "click-default-group",
+    "pyyaml",
+    "sqlite-utils",
+]
+
+[project.urls]
+Homepage = "https://github.com/nmpowell/llm-plan"
+Changelog = "https://github.com/nmpowell/llm-plan/releases"
+Issues = "https://github.com/nmpowell/llm-plan/issues"
+CI = "https://github.com/nmpowell/llm-plan/actions"
+
+[project.entry-points.llm]
+plan = "llm_plan"
+
+[project.optional-dependencies]
+# click >= 8.2 gives CliRunner separated stdout/stderr, which the CLI
+# tests assert on.
+test = ["pytest", "click>=8.2"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error::ResourceWarning",
+    # Unclosed resources detected during garbage collection arrive wrapped
+    # in this warning rather than as plain ResourceWarnings.
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["llm_plan*"]
+
+[tool.setuptools.package-data]
+llm_plan = ["plans/*.yaml", "plans/prompts/*.md"]

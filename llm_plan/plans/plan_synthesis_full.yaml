@@ -1,0 +1,62 @@
+# Multi-model synthesis: several models analyse the same input in parallel,
+# then one model reconciles their answers into a single response.
+#
+#   llm plan synthesis_full "Your question" -f context.md
+#
+# Each analyst receives the CLI instructions (and any -f fragments); the
+# synthesis stage receives only the original question plus every analysis,
+# and still runs if some analysts fail (partial_dependencies).
+#
+# The bundled synthesis prompt (prompts/synthesise.md) is a compact
+# general-purpose one. To customise it or the stages, copy this plan and
+# _defaults.yaml into `llm plan path` (same-alias plans there shadow this
+# bundled copy).
+extends: "_defaults.yaml"
+
+name: "synthesis_full"
+summary: "Multi-model analysis in parallel, reconciled by a final synthesis"
+version: "1.0"
+
+parallel_config:
+  max_workers: 7
+
+stages:
+  - name: "opus"
+    summary: "Claude Opus analysis"
+    model: "${models.opus}"
+    prompt: "CLI"
+    prompt_label: "Instructions"
+    produces: "Opus Analysis"
+
+  - name: "sonnet"
+    summary: "Claude Sonnet analysis"
+    model: "${models.sonnet}"
+    prompt: "CLI"
+    prompt_label: "Instructions"
+    produces: "Sonnet Analysis"
+
+  - name: "gemini_pro"
+    summary: "Gemini Pro analysis"
+    model: "${models.gemini_pro}"
+    prompt: "CLI"
+    prompt_label: "Instructions"
+    produces: "Gemini Pro Analysis"
+
+  - name: "gpt5"
+    summary: "GPT-5 analysis"
+    model: "${models.gpt5}"
+    prompt: "CLI"
+    prompt_label: "Instructions"
+    produces: "GPT-5 Analysis"
+
+  - name: "synthesis"
+    summary: "Synthesise all analyses"
+    model: "${models.opus}"
+    prompt:
+      - prompt: "CLI:instructions"
+        label: "Original Question"
+      - prompt: "${prompts.synthesise}"
+        label: "Synthesis Instructions"
+    depends_on: [opus, sonnet, gemini_pro, gpt5]
+    partial_dependencies: true
+    produces: "Final Synthesis"
