@@ -5,6 +5,7 @@ import time
 
 import llm
 import pytest
+import yaml
 
 from llm_plan.runner import CLIContext
 
@@ -250,6 +251,43 @@ class TestScriptAbort:
         watcher.join(timeout=2)
 
         assert_pid_dies(int(pid_file.read_text(encoding="utf-8")))
+
+    def test_a_script_spawned_during_an_abort_is_still_killed(
+        self, tmp_path, monkeypatch
+    ):
+        # The abort can land between Popen() returning and the process being
+        # registered; the registration must then kill it, not let it run on
+        # for the stage timeout.
+        import llm_plan.runner as runner_module
+        from llm_plan.runner import CLIContext, PlanRunner, load_plan
+
+        stage = script_stage(tmp_path, "import time; time.sleep(2)")
+        plan_file = tmp_path / "plan.yaml"
+        plan_file.write_text(
+            yaml.safe_dump({"name": "t", "summary": "s", "stages": [stage]}),
+            encoding="utf-8",
+        )
+        runner = PlanRunner(load_plan(plan_file), CLIContext(), retry_delay=0)
+
+        spawned = {}
+        real_popen = runner_module.subprocess.Popen
+
+        def popen_then_abort(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            spawned["process"] = process
+            runner._abort_scripts()  # lands inside the registration window
+            return process
+
+        monkeypatch.setattr(runner_module.subprocess, "Popen", popen_then_abort)
+
+        from llm_plan.models import PlanError
+
+        with pytest.raises(PlanError):
+            runner.run()
+
+        assert not runner.results["worker"].success
+        assert spawned["process"].poll() is not None, "script survived the abort"
+        assert spawned["process"].poll() != 0, "script ran to completion"
 
     def test_an_aborting_parallel_run_kills_active_scripts(
         self, tmp_path, fake_models, run_plan

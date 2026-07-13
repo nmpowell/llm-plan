@@ -162,6 +162,7 @@ class PlanRunner:
         self._scratch_dir: Path | None = None
         self._scratch_lock = threading.Lock()
         self._active_scripts: set[subprocess.Popen] = set()
+        self._scripts_aborted = False  # latched by _abort_scripts
         self._scripts_lock = threading.Lock()
 
     def run(self) -> list[StageResult]:
@@ -300,8 +301,14 @@ class PlanRunner:
             executor.shutdown(wait=not aborted, cancel_futures=aborted)
 
     def _abort_scripts(self) -> None:
-        """Kill every live script process group; their threads do the reaping."""
+        """Kill every live script process group; their threads do the reaping.
+
+        The latch closes the registration window: a script whose Popen()
+        straddles the abort is killed by its own thread on registration
+        instead of running on for the stage timeout.
+        """
         with self._scripts_lock:
+            self._scripts_aborted = True
             for process in list(self._active_scripts):
                 _kill_process_group(process)
 
@@ -486,7 +493,13 @@ class PlanRunner:
             return failure(f"could not run script: {exc}")
 
         with self._scripts_lock:
-            self._active_scripts.add(process)
+            aborted = self._scripts_aborted
+            if not aborted:
+                self._active_scripts.add(process)
+        if aborted:
+            _kill_process_group(process)
+            process.communicate()
+            return failure("aborted before the script could run")
         try:
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
