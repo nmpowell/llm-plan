@@ -570,7 +570,7 @@ class TestLogging:
         ]
         assert f"[a] response {id_a}" in result.stderr
         assert f"[b] response {id_b}" in result.stderr
-        assert "llm logs -n 2" in result.stderr
+        assert "llm logs --cid" in result.stderr
 
     def test_tracking_lines_carry_the_plan_run_id(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])
@@ -580,7 +580,40 @@ class TestLogging:
         run_lines = [line for line in result.stderr.splitlines() if "Run " in line]
         assert run_lines, result.stderr
         run_id = run_lines[0].split("Run ")[1].split(":")[0]
-        assert len(run_id) == 12
+        assert len(run_id) == 32
+
+    def test_a_runs_responses_share_one_conversation_named_for_the_plan(
+        self, tmp_path, logs_db
+    ):
+        plan = write_plan(tmp_path, [cli_stage("a"), cli_stage("b")])
+
+        result = invoke("plan", "run", str(plan), "hi")
+
+        run_id = result.stderr.split("Run ")[1].split(":")[0]
+        conversations = list(logs_db["conversations"].rows)
+        assert [c["id"] for c in conversations] == [run_id]
+        assert conversations[0]["name"] == "test"
+        assert {
+            row["conversation_id"] for row in logs_db["responses"].rows
+        } == {run_id}
+
+    def test_a_logging_failure_fails_the_run_but_keeps_the_output(
+        self, tmp_path, monkeypatch
+    ):
+        import llm_plan.cli
+
+        def broken_log(db, response, conversation):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(llm_plan.cli, "log_response", broken_log)
+
+        plan = write_plan(tmp_path, [cli_stage()])
+        result = invoke("plan", "run", str(plan), "hi", "--quiet")
+
+        assert result.exit_code != 0
+        assert "Could not log response for stage 'solo'" in result.stderr
+        assert "disk full" in result.stderr
+        assert "ECHO[hi]" in result.output
 
     def test_no_log_prints_no_tracking_lines(self, tmp_path):
         plan = write_plan(tmp_path, [cli_stage()])

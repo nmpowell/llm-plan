@@ -134,9 +134,26 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
         logged: list[tuple[str, str]] = []
         on_response = None
         if should_log:
+            conversation = None
 
             def on_response(stage, response):
-                log_response(db, response)
+                # One conversation per run: llm logs --cid <run-id> then
+                # retrieves the whole run. Logging is a promise, not
+                # best-effort - a failure must fail the command (llm prompt
+                # behaves the same way).
+                nonlocal conversation
+                if conversation is None:
+                    conversation = llm.Conversation(
+                        model=response.model,
+                        id=runner.run_id,
+                        name=loaded.name or loaded.path.stem,
+                    )
+                try:
+                    log_response(db, response, conversation)
+                except Exception as exc:
+                    raise _LoggingFailed(
+                        f"Could not log response for stage '{stage.name}': {exc}"
+                    ) from exc
                 logged.append((stage.name, response.id))
 
         runner = PlanRunner(
@@ -147,23 +164,38 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
         except PlanError as exc:
             _emit_tracking(runner.run_id, logged, quiet)
             raise click.ClickException(str(exc))
+        except _LoggingFailed as exc:
+            _print_leaf_output(runner)
+            _emit_tracking(runner.run_id, logged, quiet)
+            raise click.ClickException(str(exc))
         _emit_tracking(runner.run_id, logged, quiet)
     finally:
         db.close()
 
+    _print_leaf_output(runner)
+
     leaves = runner.leaf_stages()
-    succeeded = [runner.results[name] for name in leaves if runner.results[name].success]
+    failed = [name for name in leaves if not runner.results[name].success]
+    if failed:
+        details = "; ".join(f"{name}: {runner.results[name].error}" for name in failed)
+        raise click.ClickException(f"Plan '{loaded.name or plan_ref}' failed - {details}")
+
+
+class _LoggingFailed(Exception):
+    """A response could not be recorded in llm's logs database."""
+
+
+def _print_leaf_output(runner: PlanRunner) -> None:
+    """Print each successful leaf stage's text, the plan's final output."""
+    leaves = runner.leaf_stages()
+    succeeded = [runner.results[name] for name in leaves
+                 if name in runner.results and runner.results[name].success]
     for index, result in enumerate(succeeded):
         if len(succeeded) > 1:
             click.echo(f"## {result.name}\n")
         click.echo(result.text)
         if index < len(succeeded) - 1:
             click.echo()
-
-    failed = [name for name in leaves if not runner.results[name].success]
-    if failed:
-        details = "; ".join(f"{name}: {runner.results[name].error}" for name in failed)
-        raise click.ClickException(f"Plan '{loaded.name or plan_ref}' failed - {details}")
 
 
 def _emit_tracking(run_id: str, logged: list, quiet: bool) -> None:
@@ -174,7 +206,7 @@ def _emit_tracking(run_id: str, logged: list, quiet: bool) -> None:
     for stage_name, response_id in logged:
         click.echo(f"  [{stage_name}] response {response_id}", err=True)
     click.echo(
-        f"Logged {len(logged)} response(s); view with: llm logs -n {len(logged)}",
+        f"Logged {len(logged)} response(s); view with: llm logs --cid {run_id}",
         err=True,
     )
 

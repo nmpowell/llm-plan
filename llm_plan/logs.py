@@ -46,6 +46,19 @@ def logging_enabled(*, force_log: bool = False, no_log: bool = False) -> bool:
     return logs_on() or force_log
 
 
-def log_response(db: sqlite_utils.Database, response) -> None:
-    """Record one completed response, like the llm prompt command does."""
+def log_response(db: sqlite_utils.Database, response, conversation) -> None:
+    """Record one completed response under the run's shared conversation.
+
+    Sharing one conversation per run is what lets ``llm logs --cid <run-id>``
+    retrieve every stage of a run with llm's own tooling.
+    """
+    response.conversation = conversation
+    # A finished response no longer appends itself while draining; log_to_db
+    # expects it present in conversation.responses.
+    if not any(existing is response for existing in conversation.responses):
+        conversation.responses.append(response)
     response.log_to_db(db)
+    # log_to_db derives the row's name from the first prompt and ignores
+    # Conversation.name (llm 0.31 and 0.32) - set the plan's name explicitly.
+    if conversation.name:
+        db["conversations"].update(conversation.id, {"name": conversation.name})

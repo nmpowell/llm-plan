@@ -148,7 +148,9 @@ class PlanRunner:
             raise PlanError(f"retries must be zero or more, not {retries}")
         self.plan = plan
         self.cli = cli or CLIContext()
-        self.run_id = run_id or uuid.uuid4().hex[:12]
+        # Full-width so a collision cannot silently join another run's
+        # conversation in logs.db (its insert is insert-or-ignore).
+        self.run_id = run_id or uuid.uuid4().hex
         self.on_response = on_response
         self.progress = progress or (lambda message: None)
         self.retries = retries
@@ -319,10 +321,10 @@ class PlanRunner:
                 self._manifests[stage.name] = result.manifest
             self.progress(f"  ✓ {stage.name} ({result.duration:.1f}s)")
             if response is not None and self.on_response is not None:
-                try:
-                    self.on_response(stage, response)
-                except Exception as exc:
-                    self.progress(f"  warning: could not record response: {exc}")
+                # A callback failure propagates: recording responses is part
+                # of the run's contract, and the caller decides what a
+                # failure means. No further stage is scheduled after it.
+                self.on_response(stage, response)
         else:
             failed.add(stage.name)
             self.progress(f"  ✗ {stage.name}: {result.error}")
