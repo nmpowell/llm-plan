@@ -15,16 +15,21 @@ SEED = "seed"
 
 
 def resolve_dependencies(stage: Stage, index: int, stages: list[Stage]) -> list[str]:
-    """Effective dependencies, including the implicit previous-stage fallback.
+    """Effective dependencies: explicit, implicit-previous and ``chain:`` edges.
 
     A non-first stage with no explicit ``depends_on`` that does not use a CLI
-    prompt depends on the stage listed before it.
+    prompt depends on the stage listed before it. Stages named by ``chain:``
+    prompt items are dependencies too - the chained text cannot exist until
+    its stage has run.
     """
     if stage.depends_on:
-        return list(stage.depends_on)
-    if index > 0 and not prompt_has_cli(stage.prompt):
-        return [stages[index - 1].name]
-    return []
+        deps = list(stage.depends_on)
+    elif index > 0 and not prompt_has_cli(stage.prompt):
+        deps = [stages[index - 1].name]
+    else:
+        deps = []
+    deps += [t for t in prompt_chain_targets(stage.prompt) if t not in deps]
+    return deps
 
 
 def validate_plan(plan: Plan) -> None:

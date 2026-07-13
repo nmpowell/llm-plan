@@ -136,6 +136,37 @@ class TestPromptComposition:
 
         assert "## Earlier Analysis" in results["second"].text
 
+    def test_a_chain_consumed_dependency_is_not_also_auto_fenced(self, tmp_path, run_plan):
+        stages = [
+            {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
+            {"name": "second", "summary": "s", "model": "echo", "depends_on": ["first"],
+             "prompt": [{"prompt": "chain:first", "label": "Earlier Analysis"}]},
+        ]
+
+        runner, results = run_plan(stages, CLIContext(instructions="go"))
+
+        # The chain: item places first's text; a second auto-fenced copy
+        # would send (and bill) the same content twice.
+        text = results["second"].text
+        assert "## Output from first" not in text
+        assert text.count("ECHO[go]") == 1
+
+    def test_a_chain_only_reference_still_receives_the_dependency_text(
+        self, tmp_path, run_plan
+    ):
+        stages = [
+            {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
+            {"name": "detour", "summary": "s", "model": "echo", "prompt": "CLI"},
+            {"name": "third", "summary": "s", "model": "echo", "depends_on": ["detour"],
+             "prompt": [{"prompt": "chain:first", "label": "First Take"}]},
+        ]
+
+        runner, results = run_plan(stages, CLIContext(instructions="go"))
+
+        text = results["third"].text
+        assert "## First Take" in text
+        assert "## Output from detour" in text
+
     def test_stage_files_and_prompt_files_are_labelled_sections(self, tmp_path, run_plan):
         (tmp_path / "ctx.md").write_text("the context", encoding="utf-8")
         (tmp_path / "guide.md").write_text("the guide", encoding="utf-8")

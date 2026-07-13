@@ -38,6 +38,41 @@ class TestResolveDependencies:
 
         assert resolve_dependencies(stages[0], 0, stages) == []
 
+    def test_chain_targets_join_the_scheduling_dependencies(self):
+        stages = [
+            make_stage("a"),
+            make_stage("b", prompt="CLI"),
+            make_stage("c", depends_on=["b"], prompt=[{"prompt": "chain:a", "label": "A"}]),
+        ]
+
+        assert resolve_dependencies(stages[2], 2, stages) == ["b", "a"]
+
+    def test_a_chain_target_already_depended_on_is_not_duplicated(self):
+        stages = [
+            make_stage("a"),
+            make_stage("b", depends_on=["a"], prompt="chain:a"),
+        ]
+
+        assert resolve_dependencies(stages[1], 1, stages) == ["a"]
+
+    def test_a_forward_chain_reference_is_rejected_like_a_forward_dependency(self):
+        stages = [
+            make_stage("a", prompt=[{"prompt": "chain:b", "label": "B"}]),
+            make_stage("b", prompt="CLI"),
+        ]
+
+        with pytest.raises(PlanError, match="appears later"):
+            validate_plan(make_plan(*stages))
+
+    def test_a_chained_stage_is_not_a_leaf(self):
+        stages = [
+            make_stage("a"),
+            make_stage("b", prompt="CLI"),
+            make_stage("c", depends_on=["b"], prompt=[{"prompt": "chain:a", "label": "A"}]),
+        ]
+
+        assert leaf_stages(stages) == ["c"]
+
 
 class TestValidatePlan:
     def test_accepts_a_valid_diamond(self):

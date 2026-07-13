@@ -24,7 +24,13 @@ import pydantic
 from . import script_stage
 from .dag import SEED, leaf_stages, resolve_dependencies, topological_order, validate_plan
 from .models import Plan, PlanError, Stage, StageResult
-from .parser import parse_plan, parse_prompt_list, prompt_has_cli, prompt_wants_cli_files
+from .parser import (
+    parse_plan,
+    parse_prompt_list,
+    prompt_chain_targets,
+    prompt_has_cli,
+    prompt_wants_cli_files,
+)
 
 DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY = 5.0
@@ -603,8 +609,11 @@ class PlanRunner:
                 )
 
         by_name = {s.name: s for s in self.plan.stages}
+        # A dep consumed by a chain: item is placed by that item; an
+        # auto-fenced copy here would send the same content twice.
+        chain_consumed = set(prompt_chain_targets(stage.prompt))
         for dep in deps:
-            if dep == SEED or dep in failed:
+            if dep == SEED or dep in failed or dep in chain_consumed:
                 continue
             dep_stage = by_name.get(dep)
             label = dep_stage.produces if dep_stage and dep_stage.produces else f"Output from {dep}"
