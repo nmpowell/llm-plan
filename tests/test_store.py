@@ -14,7 +14,9 @@ not_as_root = pytest.mark.skipif(
 def write_plan(directory, filename, name="p", summary="a plan"):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / filename
-    path.write_text(yaml.safe_dump({"name": name, "summary": summary}), encoding="utf-8")
+    path.write_text(
+        yaml.safe_dump({"name": name, "summary": summary}), encoding="utf-8"
+    )
     return path
 
 
@@ -22,7 +24,7 @@ class TestIsAlias:
     @pytest.mark.parametrize(
         "value, expected",
         [
-            ("synthesis_full", True),
+            ("synthesis", True),
             ("plan.yaml", False),
             ("plans/synthesis.yaml", False),
             ("./plan", False),
@@ -54,7 +56,9 @@ class TestResolvePlan:
 
         assert resolve_plan("review") == plan
 
-    def test_env_dirs_take_precedence_over_user_dir(self, user_dir, tmp_path, monkeypatch):
+    def test_env_dirs_take_precedence_over_user_dir(
+        self, user_dir, tmp_path, monkeypatch
+    ):
         env_dir = tmp_path / "team-plans"
         env_plan = write_plan(env_dir, "plan_shared.yaml", summary="env copy")
         write_plan(user_dir / "plans", "plan_shared.yaml", summary="user copy")
@@ -67,20 +71,25 @@ class TestResolvePlan:
             resolve_plan("nope")
 
     def test_bundled_plans_resolve(self):
-        path = resolve_plan("synthesis_full")
+        path = resolve_plan("synthesis")
 
-        assert path.name == "plan_synthesis_full.yaml"
+        assert path.name == "plan_synthesis.yaml"
         assert path.exists()
 
     def test_user_plan_shadows_a_bundled_alias(self, user_dir):
-        mine = write_plan(user_dir / "plans", "plan_synthesis_full.yaml")
+        mine = write_plan(user_dir / "plans", "plan_synthesis.yaml")
 
-        assert resolve_plan("synthesis_full") == mine
+        assert resolve_plan("synthesis") == mine
 
 
 class TestListPlans:
     def test_lists_alias_name_summary_and_path(self, user_dir):
-        write_plan(user_dir / "plans", "plan_review.yaml", name="review", summary="reviews things")
+        write_plan(
+            user_dir / "plans",
+            "plan_review.yaml",
+            name="review",
+            summary="reviews things",
+        )
 
         listings = {p.alias: p for p in list_plans()}
 
@@ -104,19 +113,23 @@ class TestListPlans:
 
         assert listings["x"].summary == "env copy"
 
-    def test_bundled_synthesis_full_is_listed(self):
-        assert "synthesis_full" in {p.alias for p in list_plans()}
+    def test_bundled_synthesis_is_listed(self):
+        assert "synthesis" in {p.alias for p in list_plans()}
 
     def test_unreadable_yaml_still_lists_with_empty_summary(self, user_dir):
         plans = user_plan_dir()
-        (plans / "plan_broken.yaml").write_text(": not: valid: yaml [", encoding="utf-8")
+        (plans / "plan_broken.yaml").write_text(
+            ": not: valid: yaml [", encoding="utf-8"
+        )
 
         listings = {p.alias: p for p in list_plans()}
 
         assert listings["broken"].summary == ""
 
     @not_as_root
-    def test_a_permission_denied_plan_file_still_lists_with_empty_summary(self, user_dir):
+    def test_a_permission_denied_plan_file_still_lists_with_empty_summary(
+        self, user_dir
+    ):
         secret = user_plan_dir() / "plan_secret.yaml"
         secret.write_text("name: secret\nsummary: hidden", encoding="utf-8")
         secret.chmod(0)
@@ -133,7 +146,9 @@ class TestListPlans:
 
         assert listings["binary"].summary == ""
 
-    def test_a_directory_named_like_a_plan_still_lists_with_empty_summary(self, user_dir):
+    def test_a_directory_named_like_a_plan_still_lists_with_empty_summary(
+        self, user_dir
+    ):
         (user_plan_dir() / "plan_actually_a_directory.yaml").mkdir()
 
         listings = {p.alias: p for p in list_plans()}

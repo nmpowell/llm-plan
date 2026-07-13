@@ -7,7 +7,7 @@
 
 I've been using this for a while. It's a simple orchestrator which allows you to design plans (or "directed acyclic graphs", DAGs), or LLM calls, and send to different models. Stages of the plan can be run in parallel, or wait for one another to finish. The result is, you can ask multiple models the same question, and combine with prompts, and synthesise the answers into a cohesive final result. That "synthesise" mode is the main way I use it.
 
-Run multi-stage LLM workflows with [LLM](https://llm.datasette.io/): a *plan*
+Run multi-stage LLM workflows with [Simon Willison](https://simonwillison.net/)'s [LLM](https://llm.datasette.io/): a *plan*
 is a YAML file describing a DAG of *stages* — each an LLM prompt or a Python
 script — and each stage's output chains automatically into its dependents.
 
@@ -26,11 +26,11 @@ llm install llm-plan
 
 ## Quick start
 
-Run the bundled `synthesis_full` plan: four models analyse your question in
+Run the bundled `synthesis` plan: four models analyse your question in
 parallel, then a fifth reconciles their answers into a single response:
 
 ```bash
-llm plan synthesis_full "What are the trade-offs of a monorepo?" -f notes.md
+llm plan synthesis "What are the trade-offs of a monorepo?" -f input-notes.md
 ```
 
 The final stage's text prints to stdout; progress goes to stderr. Inspect the
@@ -235,7 +235,7 @@ the command: the log is a promise, not best-effort.
 ```bash
 llm logs --cid RUN_ID          # every stage of one run
 llm logs -r | llm plan review "critique this"   # feed a response back in
-llm plan synthesis_full "..." > answer.md        # stdout is the final answer
+llm plan synthesis "..." > answer.md        # stdout is the final answer
 ```
 
 Script stages write real files into per-stage scratch directories under a
