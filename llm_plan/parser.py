@@ -202,7 +202,7 @@ def parse_prompt_field(
     return (PromptType.INLINE, prompt)
 
 
-def _prompt_texts(prompt: str | list | None) -> list[str]:
+def prompt_texts(prompt: str | list | None) -> list[str]:
     """The text of each prompt item, skipping malformed entries."""
     if not prompt:
         return []
@@ -218,7 +218,7 @@ def prompt_has_cli(prompt: str | list | None) -> bool:
     """True if any element of the prompt field references CLI input."""
     return any(
         text.upper() == "CLI" or text.upper().startswith("CLI:")
-        for text in _prompt_texts(prompt)
+        for text in prompt_texts(prompt)
     )
 
 
@@ -226,7 +226,7 @@ def prompt_wants_cli_files(prompt: str | list | None) -> bool:
     """True if any CLI token in the prompt asks for the CLI seed files."""
     return any(
         text.upper() in ("CLI", "CLI:FILES", "CLI:ALL")
-        for text in _prompt_texts(prompt)
+        for text in prompt_texts(prompt)
     )
 
 
@@ -234,7 +234,7 @@ def prompt_chain_targets(prompt: str | list | None) -> list[str]:
     """Stage names referenced by ``chain:`` items in a prompt field."""
     return [
         text[len("chain:"):]
-        for text in _prompt_texts(prompt)
+        for text in prompt_texts(prompt)
         if text.startswith("chain:")
     ]
 
@@ -395,6 +395,11 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
     name = stage_data.get("name")
     if not name:
         raise error("'name' is required")
+    if not isinstance(name, str):
+        raise error(f"'name' must be a string, not {name!r}")
+    if "/" in name or "\\" in name:
+        # Stage names become scratch subdirectory names.
+        raise error(f"'name' must not contain path separators: {name!r}")
     name_suffix = f" ({name})"
 
     unknown_keys = sorted(set(stage_data) - KNOWN_STAGE_KEYS)

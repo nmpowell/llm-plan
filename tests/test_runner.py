@@ -1,16 +1,11 @@
 import llm
 import pytest
-import yaml
 
 from llm_plan.models import PlanError
 from llm_plan.runner import CLIContext, PlanRunner, load_plan
 
 
-def write_plan(tmp_path, stages, **top_level):
-    data = {"name": "test", "summary": "a test plan", "stages": stages, **top_level}
-    plan_file = tmp_path / "plan.yaml"
-    plan_file.write_text(yaml.safe_dump(data), encoding="utf-8")
-    return plan_file
+from conftest import write_plan
 
 
 class TestSingleStage:

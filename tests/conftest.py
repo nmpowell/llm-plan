@@ -30,6 +30,17 @@ def png_bytes():
     return PNG_1PX
 
 
+def write_plan(directory, stages, filename="plan.yaml", **top_level):
+    """Write a plan file with the suite's canonical shape; returns its path."""
+    import yaml
+
+    data = {"name": "test", "summary": "a test plan", "stages": stages, **top_level}
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / filename
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return path
+
+
 @pytest.fixture
 def run_plan(tmp_path):
     """Write a plan file, run it, and return (runner, results-by-stage-name).

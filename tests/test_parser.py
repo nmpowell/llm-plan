@@ -340,6 +340,17 @@ class TestParsePlan:
         with pytest.raises(PlanError, match=message):
             parse_plan(plan_file)
 
+    @pytest.mark.parametrize("bad_name", ["sub/dir", "back\\slash", 5, ""])
+    def test_a_stage_name_must_be_a_plain_string(self, tmp_path, bad_name):
+        # Stage names become scratch subdirectory names; a separator would
+        # escape the run's scratch root.
+        data = minimal_plan()
+        data["stages"][0]["name"] = bad_name
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match="name"):
+            parse_plan(plan_file)
+
     def test_an_llm_stage_without_a_model_uses_the_default(self, tmp_path):
         data = minimal_plan()
         data["stages"][0].pop("model")

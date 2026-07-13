@@ -4,7 +4,6 @@ import textwrap
 
 import pytest
 import sqlite_utils
-import yaml
 from click.testing import CliRunner
 from llm.cli import cli
 
@@ -13,12 +12,7 @@ not_as_root = pytest.mark.skipif(
 )
 
 
-def write_plan(directory, stages, filename="plan.yaml", **top_level):
-    data = {"name": "test", "summary": "a test plan", "stages": stages, **top_level}
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / filename
-    path.write_text(yaml.safe_dump(data), encoding="utf-8")
-    return path
+from conftest import write_plan
 
 
 def cli_stage(name="solo", model="echo", **kwargs):

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import PlanError, Stage
+from .parser import prompt_texts
 
 ENV_INSTRUCTIONS = "LLM_PLAN_INSTRUCTIONS"
 ENV_OUTPUT_DIR = "LLM_PLAN_OUTPUT_DIR"
@@ -67,7 +68,7 @@ def validate_runtime_vars(stages: list[Stage]) -> None:
                     )
         if stage.type == "python_script":
             continue
-        for text in _prompt_strings(stage.prompt):
+        for text in prompt_texts(stage.prompt):
             for token in _RUNTIME_VAR_RE.findall(text):
                 if token.split(".")[0] in RUNTIME_VAR_SPEC:
                     raise PlanError(
@@ -76,17 +77,6 @@ def validate_runtime_vars(stages: list[Stage]) -> None:
                         f"runtime variables are only substituted in script_args, "
                         f"env values and --plan-arg values"
                     )
-
-
-def _prompt_strings(prompt) -> list[str]:
-    """Every prompt string in a scalar-or-list prompt spec."""
-    items = prompt if isinstance(prompt, list) else [prompt]
-    texts = []
-    for item in items:
-        text = item.get("prompt", "") if isinstance(item, dict) else item
-        if isinstance(text, str):
-            texts.append(text)
-    return texts
 
 
 def substitute_runtime(value: str, runtime: dict) -> str:
