@@ -36,6 +36,11 @@ DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY = 5.0
 DEFAULT_SCRIPT_TIMEOUT = 3600
 
+# Deterministic model-call failures: a missing key or a validation error
+# (llm raises ValueError/NotImplementedError/TypeError for unsupported
+# attachments, tools and call shapes) never fixes itself between attempts.
+_NON_RETRYABLE = (llm.NeedsKeyException, ValueError, NotImplementedError, TypeError)
+
 
 def load_plan(path) -> Plan:
     """Parse and fully validate a plan file."""
@@ -384,8 +389,8 @@ class PlanRunner:
                 if os.environ.get("LLM_RAISE_ERRORS"):
                     raise  # llm's debugging convention: surface the original
                 last_error = str(exc) or type(exc).__name__
-                if isinstance(exc, llm.NeedsKeyException):
-                    break  # a missing key never fixes itself mid-run
+                if isinstance(exc, _NON_RETRYABLE):
+                    break  # deterministic failures never fix themselves mid-run
                 continue
             return StageResult(
                 name=stage.name,

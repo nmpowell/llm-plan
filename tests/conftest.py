@@ -159,6 +159,21 @@ class NeedsKeyModel(llm.Model):
         raise llm.NeedsKeyException("No key found for model 'needskey'")
 
 
+class RaisingModel(llm.Model):
+    """Raises whatever exception a test assigns to it."""
+
+    model_id = "raising"
+    can_stream = True
+
+    def __init__(self):
+        self.exception = RuntimeError("unset")
+        self.calls = 0
+
+    def execute(self, prompt, stream, response, conversation):
+        self.calls += 1
+        raise self.exception
+
+
 class PairModel(llm.Model):
     """Succeeds only when two executions overlap in time."""
 
@@ -206,6 +221,7 @@ def fake_models():
         needskey=NeedsKeyModel(),
         nostream=NonStreamingModel(),
         pair=PairModel(),
+        raising=RaisingModel(),
         timing=TimingModel(),
     )
 
@@ -221,6 +237,7 @@ def fake_models():
             register(models.needskey)
             register(models.nostream)
             register(models.pair)
+            register(models.raising)
             register(models.timing)
 
     pm.register(TestModelsPlugin(), name="llm-plan-test-models")

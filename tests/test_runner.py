@@ -449,6 +449,23 @@ class TestFailureHandling:
         assert "key" in results["solo"].error.lower()
         assert fake_models.needskey.calls == 1
 
+    @pytest.mark.parametrize("exception", [
+        ValueError("unsupported attachment type"),
+        NotImplementedError("this model cannot use tools"),
+        TypeError("unexpected keyword argument"),
+    ], ids=["ValueError", "NotImplementedError", "TypeError"])
+    def test_a_validation_style_error_fails_the_stage_without_retrying(
+        self, tmp_path, fake_models, run_plan, exception
+    ):
+        fake_models.raising.exception = exception
+
+        stages = [{"name": "solo", "summary": "s", "model": "raising", "prompt": "CLI"}]
+        runner, results = run_plan(stages, CLIContext(instructions="hi"), expect_error=True)
+
+        assert not results["solo"].success
+        assert str(exception) in results["solo"].error
+        assert fake_models.raising.calls == 1
+
     def test_failure_after_retries_exhausted_fails_the_stage(self, tmp_path, fake_models, run_plan):
         fake_models.flaky.failures_left = 10
         stages = [{"name": "solo", "summary": "s", "model": "flaky", "prompt": "CLI"}]
