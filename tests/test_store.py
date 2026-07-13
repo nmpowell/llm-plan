@@ -1,8 +1,14 @@
+import os
+
 import pytest
 import yaml
 
 from llm_plan.models import PlanError
 from llm_plan.store import is_alias, list_plans, resolve_plan, user_plan_dir
+
+not_as_root = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores file permissions"
+)
 
 
 def write_plan(directory, filename, name="p", summary="a plan"):
@@ -108,3 +114,28 @@ class TestListPlans:
         listings = {p.alias: p for p in list_plans()}
 
         assert listings["broken"].summary == ""
+
+    @not_as_root
+    def test_a_permission_denied_plan_file_still_lists_with_empty_summary(self, user_dir):
+        secret = user_plan_dir() / "plan_secret.yaml"
+        secret.write_text("name: secret\nsummary: hidden", encoding="utf-8")
+        secret.chmod(0)
+
+        listings = {p.alias: p for p in list_plans()}
+
+        secret.chmod(0o644)
+        assert listings["secret"].summary == ""
+
+    def test_a_non_utf8_plan_file_still_lists_with_empty_summary(self, user_dir):
+        (user_plan_dir() / "plan_binary.yaml").write_bytes(b"\xff\xfe not utf-8")
+
+        listings = {p.alias: p for p in list_plans()}
+
+        assert listings["binary"].summary == ""
+
+    def test_a_directory_named_like_a_plan_still_lists_with_empty_summary(self, user_dir):
+        (user_plan_dir() / "plan_actually_a_directory.yaml").mkdir()
+
+        listings = {p.alias: p for p in list_plans()}
+
+        assert listings["actually_a_directory"].summary == ""

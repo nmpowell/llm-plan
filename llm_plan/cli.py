@@ -23,6 +23,18 @@ def plan():
     """
 
 
+class _AttachmentType(click.ParamType):
+    """llm's own attachment resolution, imported lazily to avoid a
+    circular import (llm.cli imports this module while initialising)."""
+
+    name = "attachment"
+
+    def convert(self, value, param, ctx):
+        from llm.cli import AttachmentType
+
+        return AttachmentType().convert(value, param, ctx)
+
+
 class _InstructionOrderCommand(click.Command):
     """Record the command-line order of -i and --ci occurrences.
 
@@ -59,8 +71,10 @@ class _InstructionOrderCommand(click.Command):
               type=(click.Path(exists=True, dir_okay=False), str),
               help="Labelled seed file: --cf PATH LABEL (repeatable)")
 @click.option("attachments", "-a", "--attachment", multiple=True,
-              help="Seed attachment: file path or URL")
-@click.option("model_id", "-m", "--model", help="Override the model for every LLM stage")
+              type=_AttachmentType(),
+              help="Seed attachment: path, URL or - for stdin")
+@click.option("model_id", "-m", "--model", envvar="LLM_MODEL",
+              help="Override the model for every LLM stage")
 @click.option("options", "-o", "--option", type=(str, str), multiple=True,
               help="Model option key/value, applied to every LLM stage")
 @click.option("plan_args", "--plan-arg", multiple=True,
@@ -75,7 +89,7 @@ class _InstructionOrderCommand(click.Command):
 @click.option("database", "-d", "--database",
               type=click.Path(dir_okay=False, writable=True, allow_dash=False),
               help="Path to a log database to use instead of logs.db")
-@click.option("quiet", "-q", "--quiet", is_flag=True, help="Suppress progress output")
+@click.option("quiet", "--quiet", is_flag=True, help="Suppress progress output")
 def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
          context_files, attachments, model_id, options, plan_args, do_explain,
          retries, no_log, force_log, database, quiet):
@@ -99,6 +113,7 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
         click.echo(explain(loaded, list(plan_args)), nl=False)
         return
 
+    should_log = logging_enabled(force_log=force_log, no_log=no_log)
     db = open_logs_db(database)
     try:
         order = click.get_current_context().meta.get("instruction_order", [])
@@ -112,12 +127,13 @@ def run_(plan_ref, prompt, instructions, headed_instructions, fragments,
             options=dict(options),
             plan_args=list(plan_args),
         )
-        _resolve_seed_inputs(db, fragments, attachments, context)
+        _resolve_fragments(db, fragments, context)
+        context.attachments.extend(attachments)
 
         progress = None if quiet else (lambda message: click.echo(message, err=True))
         logged: list[tuple[str, str]] = []
         on_response = None
-        if logging_enabled(force_log=force_log, no_log=no_log):
+        if should_log:
 
             def on_response(stage, response):
                 log_response(db, response)
@@ -184,37 +200,43 @@ def _ordered_instruction_parts(
 
 
 def _read_prompt(argument: str | None) -> str:
-    """Combine piped stdin and the prompt argument, stdin first (like llm)."""
-    parts = []
+    """Combine piped stdin and the prompt argument, exactly like llm prompt.
+
+    Mirrors llm 0.31's read_prompt: stdin is never stripped (indented code
+    must survive piping) and the argument follows it after a single space.
+    """
+    stdin_prompt = None
     if not sys.stdin.isatty():
-        piped = sys.stdin.read().strip()
-        if piped:
-            parts.append(piped)
+        stdin_prompt = sys.stdin.read()
+    if not stdin_prompt:
+        return argument or ""
+    bits = [stdin_prompt]
     if argument:
-        parts.append(argument)
-    return " ".join(parts)
+        bits.append(argument)
+    return " ".join(bits)
 
 
-def _resolve_seed_inputs(db, fragments, attachments, context: CLIContext) -> None:
-    """Resolve -f/-a values into llm Fragment and Attachment objects."""
-    from llm.cli import resolve_fragments
+def _resolve_fragments(db, fragments, context: CLIContext) -> None:
+    """Resolve -f values into llm Fragment and Attachment objects."""
+    try:
+        from llm.cli import FragmentNotFound, resolve_fragments
+    except ImportError as exc:
+        from importlib.metadata import version
+
+        raise click.ClickException(
+            f"-f needs llm's fragment resolver, which is missing from the "
+            f"installed llm {version('llm')} ({exc})"
+        )
 
     try:
         resolved = resolve_fragments(db, fragments, allow_attachments=True)
-    except Exception as exc:
+    except FragmentNotFound as exc:
         raise click.ClickException(str(exc))
     for item in resolved:
         if isinstance(item, llm.Attachment):
             context.attachments.append(item)
         else:
             context.fragments.append(item)
-
-    for value in attachments:
-        if "://" in value:
-            context.attachments.append(llm.Attachment(url=value))
-        else:
-            path = click.Path(exists=True, dir_okay=False).convert(value, None, None)
-            context.attachments.append(llm.Attachment(path=str(path)))
 
 
 @plan.command(name="list")
@@ -247,8 +269,12 @@ def show_(plan_ref):
         path = resolve_plan(plan_ref)
     except PlanError as exc:
         raise click.ClickException(str(exc))
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(f"Cannot read plan file {path}: {exc}")
     click.echo(f"# {path}", err=True)
-    click.echo(path.read_text(encoding="utf-8"), nl=False)
+    click.echo(content, nl=False)
 
 
 @plan.command(name="path")

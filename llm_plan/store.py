@@ -95,7 +95,7 @@ def list_plans() -> list[PlanListing]:
                 if isinstance(data, dict):
                     name = data.get("name")
                     summary = data.get("summary")
-            except yaml.YAMLError:
+            except (yaml.YAMLError, OSError, UnicodeDecodeError):
                 pass
             listings[alias] = PlanListing(
                 alias=alias,
