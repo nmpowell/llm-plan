@@ -413,8 +413,9 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
     script = stage_data.get("script")
     resolved_script = None
     if stage_type == "llm":
-        if not model:
-            raise error("'model' is required for llm stages")
+        # No model means llm's configured default, like upstream templates.
+        if model is not None and (not isinstance(model, str) or not model):
+            raise error(f"'model' must be a non-empty string, not {model!r}")
     else:
         if not script:
             raise error("'script' is required for python_script stages")

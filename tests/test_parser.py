@@ -318,7 +318,8 @@ class TestParsePlan:
         [
             (lambda s: s.pop("name"), "'name' is required"),
             (lambda s: s.pop("summary"), "'summary' is required"),
-            (lambda s: s.pop("model"), "'model' is required"),
+            (lambda s: s.update(model=5), "'model' must be a non-empty string"),
+            (lambda s: s.update(model=""), "'model' must be a non-empty string"),
             (lambda s: s.update(type="shell"), "shell"),
             (lambda s: s.update(timeout=-1), "positive integer"),
             (lambda s: s.update(timeout=True), "positive integer"),
@@ -338,6 +339,15 @@ class TestParsePlan:
 
         with pytest.raises(PlanError, match=message):
             parse_plan(plan_file)
+
+    def test_an_llm_stage_without_a_model_uses_the_default(self, tmp_path):
+        data = minimal_plan()
+        data["stages"][0].pop("model")
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        plan = parse_plan(plan_file)
+
+        assert plan.stages[0].model is None
 
     @pytest.mark.parametrize(
         "flag", ["exclusive", "continue_on_failure", "partial_dependencies"]

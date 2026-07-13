@@ -457,6 +457,15 @@ class TestFailureHandling:
         assert "key" in results["solo"].error.lower()
         assert fake_models.needskey.calls == 1
 
+    def test_a_stage_without_a_model_runs_on_llms_default(self, tmp_path, fake_models, run_plan):
+        llm.set_default_model("echo")
+
+        stages = [{"name": "solo", "summary": "s", "prompt": "CLI"}]
+        runner, results = run_plan(stages, CLIContext(instructions="hi"))
+
+        assert results["solo"].success
+        assert fake_models.echo.prompts[0].prompt == "hi"
+
     @pytest.mark.parametrize("exception", [
         ValueError("unsupported attachment type"),
         NotImplementedError("this model cannot use tools"),

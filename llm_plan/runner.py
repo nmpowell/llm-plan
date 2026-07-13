@@ -68,7 +68,7 @@ def explain(plan: Plan, plan_args: list[str] | None = None) -> str:
         if stage.type == "python_script":
             lines.append(f"     script: {stage.script}")
         else:
-            lines.append(f"     model: {stage.model}")
+            lines.append(f"     model: {stage.model or '(llm default)'}")
         if deps:
             labelled = []
             for dep in deps:
