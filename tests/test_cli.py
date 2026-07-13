@@ -19,7 +19,7 @@ def cli_stage(name="solo", model="echo", **kwargs):
     return {"name": name, "summary": f"{name} stage", "model": model, "prompt": "CLI", **kwargs}
 
 
-PINNED_SYNTHESISE_SHA256 = "181893a6ee40d17fc049991fdded2ae5926a4d0980114ed12f30e902bf0e453a"
+PINNED_SYNTHESISE_SHA256 = "61425345ac41aae86be956a3910dc9ba9d6c81b5c05a6c7b7b7d796b13540f5b"
 
 
 def invoke(*args, **kwargs):

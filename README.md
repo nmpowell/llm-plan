@@ -5,6 +5,8 @@
 [![Tests](https://github.com/nmpowell/llm-plan/actions/workflows/test.yml/badge.svg)](https://github.com/nmpowell/llm-plan/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/nmpowell/llm-plan/blob/main/LICENSE)
 
+I've been using this for a while. It's a simple orchestrator which allows you to design plans (or "directed acyclic graphs", DAGs), or LLM calls, and send to different models. Stages of the plan can be run in parallel, or wait for one another to finish. The result is, you can ask multiple models the same question, and combine with prompts, and synthesise the answers into a cohesive final result. That "synthesise" mode is the main way I use it.
+
 Run multi-stage LLM workflows with [LLM](https://llm.datasette.io/): a *plan*
 is a YAML file describing a DAG of *stages* — each an LLM prompt or a Python
 script — and each stage's output chains automatically into its dependents.
