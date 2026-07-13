@@ -21,6 +21,9 @@ PINNED_SYNTHESISE_SHA256 = "181893a6ee40d17fc049991fdded2ae5926a4d0980114ed12f30
 
 
 def invoke(*args, **kwargs):
+    # Unexpected exceptions should fail loudly; click errors still produce
+    # a normal Result because standalone mode converts them to SystemExit.
+    kwargs.setdefault("catch_exceptions", False)
     return CliRunner().invoke(cli, list(args), **kwargs)
 
 
@@ -352,6 +355,7 @@ class TestLogging:
 
         result = invoke("plan", "run", str(plan), "hi", "-n")
 
+        assert result.exit_code == 0, result.stderr
         assert "response" not in result.stderr
         assert "llm logs" not in result.stderr
 

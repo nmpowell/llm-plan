@@ -56,6 +56,7 @@ class TestSingleStage:
         runner, results = run_plan(
             [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}],
             CLIContext(),
+            expect_error=True,
         )
 
         assert not results["solo"].success
@@ -65,6 +66,7 @@ class TestSingleStage:
         runner, results = run_plan(
             [{"name": "solo", "summary": "s", "model": "no-such-model", "prompt": "CLI"}],
             CLIContext(instructions="hi"),
+            expect_error=True,
         )
 
         assert not results["solo"].success
@@ -79,7 +81,7 @@ class TestSingleStage:
             "options": {"nonsense_option": 1},
         }
 
-        runner, results = run_plan([stage], CLIContext(instructions="hi"))
+        runner, results = run_plan([stage], CLIContext(instructions="hi"), expect_error=True)
 
         assert not results["solo"].success
         assert "nonsense_option" in results["solo"].error
@@ -89,6 +91,7 @@ class TestSingleStage:
         runner, results = run_plan(
             [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"}],
             CLIContext(),
+            expect_error=True,
         )
 
         assert not results["solo"].success
@@ -347,7 +350,7 @@ class TestFailureHandling:
         fake_models.flaky.failures_left = 10
         stages = [{"name": "solo", "summary": "s", "model": "flaky", "prompt": "CLI"}]
 
-        runner, results = run_plan(stages, CLIContext(instructions="hi"))
+        runner, results = run_plan(stages, CLIContext(instructions="hi"), expect_error=True)
 
         assert not results["solo"].success
         assert "transient upstream error" in results["solo"].error

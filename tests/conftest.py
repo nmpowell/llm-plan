@@ -32,14 +32,15 @@ def png_bytes():
 def run_plan(tmp_path):
     """Write a plan file, run it, and return (runner, results-by-stage-name).
 
-    Sequential-abort errors are tolerated so results stay inspectable.
+    Unexpected errors propagate; a test exercising a failing plan passes
+    ``expect_error=True`` and the fixture asserts the run raised PlanError.
     """
     import yaml
 
     from llm_plan.models import PlanError
     from llm_plan.runner import CLIContext, PlanRunner, load_plan
 
-    def _run_plan(stages, cli=None, max_workers=1, **runner_kwargs):
+    def _run_plan(stages, cli=None, max_workers=1, expect_error=False, **runner_kwargs):
         data = {
             "name": "test",
             "summary": "a test plan",
@@ -49,10 +50,11 @@ def run_plan(tmp_path):
         plan_file = tmp_path / "plan.yaml"
         plan_file.write_text(yaml.safe_dump(data), encoding="utf-8")
         runner = PlanRunner(load_plan(plan_file), cli or CLIContext(), retry_delay=0, **runner_kwargs)
-        try:
+        if expect_error:
+            with pytest.raises(PlanError):
+                runner.run()
+        else:
             runner.run()
-        except PlanError:
-            pass
         return runner, dict(runner.results)
 
     return _run_plan

@@ -71,13 +71,13 @@ class TestScriptExecution:
 
     def test_declared_but_missing_output_fails_the_stage(self, tmp_path, run_plan):
         body = 'print("/nonexistent/path/file.md")'
-        runner, results = run_plan([script_stage(tmp_path, body)])
+        runner, results = run_plan([script_stage(tmp_path, body)], expect_error=True)
 
         assert not results["worker"].success
         assert "file.md" in results["worker"].error
 
     def test_no_output_fails_the_stage(self, tmp_path, run_plan):
-        runner, results = run_plan([script_stage(tmp_path, 'print()')])
+        runner, results = run_plan([script_stage(tmp_path, 'print()')], expect_error=True)
 
         assert not results["worker"].success
         assert "no output" in results["worker"].error.lower()
@@ -88,7 +88,7 @@ class TestScriptExecution:
         print("diagnostic detail", file=sys.stderr)
         sys.exit(3)
         """
-        runner, results = run_plan([script_stage(tmp_path, body)])
+        runner, results = run_plan([script_stage(tmp_path, body)], expect_error=True)
 
         assert not results["worker"].success
         assert "3" in results["worker"].error
@@ -98,7 +98,7 @@ class TestScriptExecution:
         body = "import time; time.sleep(10)"
         stage = script_stage(tmp_path, body, timeout=1)
 
-        runner, results = run_plan([stage])
+        runner, results = run_plan([stage], expect_error=True)
 
         assert not results["worker"].success
         assert "timeout" in results["worker"].error.lower()
@@ -111,7 +111,7 @@ class TestScriptExecution:
     def test_malformed_manifests_fail_the_stage_cleanly(self, tmp_path, stdout_line, run_plan):
         body = f"print('{stdout_line}')"
 
-        runner, results = run_plan([script_stage(tmp_path, body)])
+        runner, results = run_plan([script_stage(tmp_path, body)], expect_error=True)
 
         assert not results["worker"].success
         assert "manifest" in results["worker"].error.lower()
@@ -124,7 +124,7 @@ class TestScriptExecution:
         print(out)
         """
 
-        runner, results = run_plan([script_stage(tmp_path, body)])
+        runner, results = run_plan([script_stage(tmp_path, body)], expect_error=True)
 
         assert not results["worker"].success
         assert "binary.bin" in results["worker"].error
@@ -244,7 +244,7 @@ class TestScriptInputs:
         stage = script_stage(tmp_path, RECORDER_SCRIPT)
         cli = CLIContext(plan_args=["${cli.bogus}"])
 
-        runner, results = run_plan([stage], cli)
+        runner, results = run_plan([stage], cli, expect_error=True)
 
         assert not results["worker"].success
         assert "cli.bogus" in results["worker"].error
