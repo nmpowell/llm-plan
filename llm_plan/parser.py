@@ -245,14 +245,17 @@ def parse_prompt_list(
     cli_instruction_parts: list[tuple[str | None, str]],
     completed_text: dict[str, str],
     base_dir: Path | None = None,
+    skip_chain_targets: frozenset[str] = frozenset(),
 ) -> PromptSpec:
     """Parse a stage's prompt spec (scalar or list) into a PromptSpec.
 
     ``completed_text`` maps finished-stage names to their response text, for
-    ``chain:`` items. ``cli_instruction_parts`` are ordered (heading, text)
-    pairs from the command line, included wherever CLI instructions are
-    requested; a part's heading (or, failing that, the prompt item's label)
-    becomes its section heading. Called at stage-execution time.
+    ``chain:`` items; a target in ``skip_chain_targets`` (a failed dependency
+    the stage tolerates) is omitted rather than an error.
+    ``cli_instruction_parts`` are ordered (heading, text) pairs from the
+    command line, included wherever CLI instructions are requested; a part's
+    heading (or, failing that, the prompt item's label) becomes its section
+    heading. Called at stage-execution time.
     """
     if not prompt:
         return PromptSpec()
@@ -285,10 +288,15 @@ def parse_prompt_list(
             sections.append((label, value))
 
         elif ptype == PromptType.CHAIN:
+            if value in skip_chain_targets:
+                continue
             if value not in completed_text:
+                # chain: targets are scheduling dependencies, so an
+                # uncompleted one here means a failed dependency the stage
+                # does not tolerate - or a caller bypassing the scheduler.
                 raise PlanError(
-                    f"Stage '{stage_name}' references chain:'{value}' but that stage "
-                    f"has not completed. Add it to depends_on. "
+                    f"Stage '{stage_name}' references chain:'{value}' but that "
+                    f"stage has no completed output. "
                     f"Available: {sorted(completed_text)}"
                 )
             sections.append((label, completed_text[value]))
@@ -397,9 +405,10 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         raise error("'name' is required")
     if not isinstance(name, str):
         raise error(f"'name' must be a string, not {name!r}")
-    if "/" in name or "\\" in name:
-        # Stage names become scratch subdirectory names.
-        raise error(f"'name' must not contain path separators: {name!r}")
+    if "/" in name or "\\" in name or name in (".", ".."):
+        # Stage names become scratch subdirectory names; a separator or dot
+        # component would escape (or collapse into) the run's scratch root.
+        raise error(f"'name' must be a plain directory-safe name, not {name!r}")
     name_suffix = f" ({name})"
 
     unknown_keys = sorted(set(stage_data) - KNOWN_STAGE_KEYS)
@@ -438,15 +447,17 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
     ):
         raise error("'timeout' must be a positive integer (seconds)")
 
-    env = stage_data.get("env") or {}
+    # An explicit empty value (YAML `env:` with nothing) means the default;
+    # any other type is a mistake, however falsey.
+    env = _defaulted(stage_data, "env", {})
     if not isinstance(env, dict):
-        raise error("'env' must be a mapping of name to value")
+        raise error(f"'env' must be a mapping of name to value, not {env!r}")
 
-    options = stage_data.get("options") or {}
+    options = _defaulted(stage_data, "options", {})
     if not isinstance(options, dict):
-        raise error("'options' must be a mapping")
+        raise error(f"'options' must be a mapping, not {options!r}")
 
-    depends_on = stage_data.get("depends_on") or []
+    depends_on = _defaulted(stage_data, "depends_on", [])
     if not isinstance(depends_on, list):
         raise error(f"'depends_on' must be a list of stage names, not {depends_on!r}")
     non_strings = [dep for dep in depends_on if not isinstance(dep, str)]
@@ -461,7 +472,9 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         if not isinstance(flag_value, bool):
             raise error(f"'{flag}' must be a boolean (true/false), not {flag_value!r}")
 
-    prompt = stage_data.get("prompt")
+    prompt = _defaulted(stage_data, "prompt", None)
+    if prompt is not None and not isinstance(prompt, (str, list)):
+        raise error(f"'prompt' must be a string or a list, not {prompt!r}")
     if prompt:
         # Fail fast on a malformed entry or missing prompt file, before any
         # stage runs (and spends money).
@@ -525,6 +538,12 @@ def _parse_stage(stage_data: dict, number: int, plan_file: Path) -> Stage:
         resolved_attachments=resolved_attachments,
         resolved_script=resolved_script,
     )
+
+
+def _defaulted(stage_data: dict, key: str, default):
+    """The field's value, with an absent or explicitly-null key as default."""
+    value = stage_data.get(key)
+    return default if value is None else value
 
 
 def _unknown_keys_message(unknown_keys: list[str]) -> str:

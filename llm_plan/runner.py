@@ -586,12 +586,14 @@ class PlanRunner:
     # -- prompt preparation ---------------------------------------------------
 
     def _prepare_llm(self, stage: Stage, index: int, deps: list[str], failed: set[str]):
+        tolerates_failure = stage.partial_dependencies or stage.continue_on_failure
         spec = parse_prompt_list(
             stage.prompt,
             stage.name,
             self.cli.all_instruction_parts,
             self._text,
             self.plan.base_dir,
+            skip_chain_targets=frozenset(failed) if tolerates_failure else frozenset(),
         )
 
         wants_cli_files = self._wants_cli_files(stage, index, deps, prompt_wants_files=spec.wants_cli_files)

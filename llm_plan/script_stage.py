@@ -43,13 +43,27 @@ RUNTIME_VAR_SPEC: dict[str, frozenset[str]] = {
 _RUNTIME_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 
+RESERVED_ENV_NAMES = frozenset(
+    {ENV_INSTRUCTIONS, ENV_OUTPUT_DIR, ENV_RUN_ID, ENV_STAGE_NAME}
+)
+
+
 def validate_runtime_vars(stages: list[Stage]) -> None:
     """Reject unknown ``${...}`` tokens in script_args and env at load time.
 
     Runs after the load-time variable pass, so the only tokens left are the
     deferred runtime ones; this catches typos before any stage spends money.
+    Also rejects ``env:`` entries that would override the runner-owned
+    ``LLM_PLAN_*`` variables - overriding LLM_PLAN_OUTPUT_DIR would let two
+    parallel stages share an output directory again.
     """
     for stage in stages:
+        reserved = sorted(RESERVED_ENV_NAMES & set(stage.env))
+        if reserved:
+            raise PlanError(
+                f"Stage '{stage.name}': env must not set the runner-owned "
+                f"variable(s) {', '.join(reserved)}"
+            )
         for value in list(stage.script_args) + list(stage.env.values()):
             if not isinstance(value, str):
                 continue

@@ -189,13 +189,24 @@ class TestParsePromptList:
         assert spec.sections == [("Analysis", "analyst says hi")]
 
     def test_chain_to_unfinished_stage_is_an_error_listing_available(self):
-        with pytest.raises(PlanError, match="analyst.*depends_on.*reviewer"):
+        with pytest.raises(PlanError, match="analyst.*no completed output.*reviewer"):
             parse_prompt_list(
                 "chain:analyst",
                 "stage",
                 [],
                 completed_text={"reviewer": "text"},
             )
+
+    def test_a_skipped_chain_target_is_omitted_not_an_error(self):
+        spec = parse_prompt_list(
+            ["chain:analyst", "inline:fallback"],
+            "stage",
+            [],
+            completed_text={},
+            skip_chain_targets=frozenset({"analyst"}),
+        )
+
+        assert spec.sections == [(None, "fallback")]
 
     def test_plain_cli_wants_files_and_requires_content(self):
         spec = parse_prompt_list("CLI", "stage", [], completed_text={})
@@ -340,7 +351,7 @@ class TestParsePlan:
         with pytest.raises(PlanError, match=message):
             parse_plan(plan_file)
 
-    @pytest.mark.parametrize("bad_name", ["sub/dir", "back\\slash", 5, ""])
+    @pytest.mark.parametrize("bad_name", ["sub/dir", "back\\slash", 5, "", ".", ".."])
     def test_a_stage_name_must_be_a_plain_string(self, tmp_path, bad_name):
         # Stage names become scratch subdirectory names; a separator would
         # escape the run's scratch root.
@@ -350,6 +361,39 @@ class TestParsePlan:
 
         with pytest.raises(PlanError, match="name"):
             parse_plan(plan_file)
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("depends_on", False),
+            ("depends_on", 0),
+            ("env", False),
+            ("env", ""),
+            ("options", 0),
+            ("options", False),
+            ("prompt", False),
+            ("prompt", 0),
+        ],
+    )
+    def test_falsey_malformed_fields_are_rejected_at_load(self, tmp_path, field, value):
+        # `x or default` would silently turn these into empty defaults.
+        data = minimal_plan()
+        data["stages"][0][field] = value
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        with pytest.raises(PlanError, match=field):
+            parse_plan(plan_file)
+
+    @pytest.mark.parametrize("field", ["depends_on", "env", "options", "prompt"])
+    def test_an_explicitly_empty_field_means_its_default(self, tmp_path, field):
+        # YAML idiom: a key with no value (None) is fine, unlike a wrong type.
+        data = minimal_plan()
+        data["stages"][0][field] = None
+        plan_file = write_yaml(tmp_path / "plan.yaml", data)
+
+        plan = parse_plan(plan_file)
+
+        assert plan.stages[0].name
 
     def test_an_llm_stage_without_a_model_uses_the_default(self, tmp_path):
         data = minimal_plan()

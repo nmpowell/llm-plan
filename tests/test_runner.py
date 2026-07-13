@@ -452,6 +452,25 @@ class TestFailureHandling:
         assert "key" in results["solo"].error.lower()
         assert fake_models.needskey.calls == 1
 
+    def test_a_tolerant_stage_omits_a_failed_chain_section(self, tmp_path, fake_models, run_plan):
+        fake_models.raising.exception = ValueError("producer broke")
+
+        stages = [
+            {"name": "producer", "summary": "s", "model": "raising", "prompt": "CLI"},
+            {"name": "consumer", "summary": "s", "model": "echo",
+             "partial_dependencies": True,
+             "prompt": [
+                 {"prompt": "chain:producer", "label": "Producer Output"},
+                 "inline:Carry on without it.",
+             ]},
+        ]
+        runner, results = run_plan(stages, CLIContext(instructions="go"))
+
+        assert not results["producer"].success
+        assert results["consumer"].success, results["consumer"].error
+        assert "Producer Output" not in results["consumer"].text
+        assert "Carry on without it." in results["consumer"].text
+
     def test_a_stage_without_a_model_runs_on_llms_default(self, tmp_path, fake_models, run_plan):
         llm.set_default_model("echo")
 
@@ -630,6 +649,24 @@ class TestLoadPlan:
         )
 
         with pytest.raises(PlanError, match="cli.bogus"):
+            load_plan(plan_file)
+
+    @pytest.mark.parametrize("reserved", [
+        "LLM_PLAN_OUTPUT_DIR", "LLM_PLAN_RUN_ID",
+        "LLM_PLAN_STAGE_NAME", "LLM_PLAN_INSTRUCTIONS",
+    ])
+    def test_load_plan_rejects_reserved_env_names(self, tmp_path, reserved):
+        # Overriding LLM_PLAN_OUTPUT_DIR would let two parallel stages share
+        # an output directory again - the runner owns these variables.
+        script = tmp_path / "s.py"
+        script.write_text("", encoding="utf-8")
+        plan_file = write_plan(
+            tmp_path,
+            [{"name": "a", "summary": "s", "type": "python_script", "script": "s.py",
+              "env": {reserved: "/tmp/shared"}}],
+        )
+
+        with pytest.raises(PlanError, match=reserved):
             load_plan(plan_file)
 
     @pytest.mark.parametrize("prompt", [
