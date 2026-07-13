@@ -102,7 +102,6 @@ class Plan:
     stages: list[Stage]
     name: str | None = None
     summary: str | None = None
-    version: str = "1.0"
     max_workers: int = 1
 
     @property

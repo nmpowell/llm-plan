@@ -18,7 +18,7 @@ import yaml
 from .models import AttachmentRef, FileRef, Plan, PlanError, PromptSpec, PromptType, Stage
 
 # Top-level plan keys that are structure, not variable namespaces.
-RESERVED_KEYS = frozenset({"extends", "name", "summary", "version", "stages", "parallel_config"})
+RESERVED_KEYS = frozenset({"extends", "name", "summary", "stages", "parallel_config"})
 
 # Namespaces resolved at stage-execution time, not load time.
 RUNTIME_NAMESPACES = frozenset({"cli", "run"})
@@ -388,7 +388,6 @@ def parse_plan(plan_file: Path) -> Plan:
         stages=stages,
         name=data.get("name"),
         summary=data.get("summary"),
-        version=str(data.get("version", "1.0")),
         max_workers=max_workers,
     )
 

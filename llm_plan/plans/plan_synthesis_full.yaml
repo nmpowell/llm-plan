@@ -15,7 +15,6 @@ extends: "_defaults.yaml"
 
 name: "synthesis_full"
 summary: "Multi-model analysis in parallel, reconciled by a final synthesis"
-version: "1.0"
 
 parallel_config:
   max_workers: 7

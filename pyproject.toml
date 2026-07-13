@@ -10,6 +10,7 @@ dependencies = [
     "llm>=0.31",
     "click",
     "click-default-group",
+    "pydantic",
     "pyyaml",
     "sqlite-utils",
 ]
