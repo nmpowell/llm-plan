@@ -24,7 +24,9 @@ CI = "https://github.com/nmpowell/llm-plan/actions"
 plan = "llm_plan"
 
 [project.optional-dependencies]
-test = ["pytest"]
+# click >= 8.2 gives CliRunner separated stdout/stderr, which the CLI
+# tests assert on.
+test = ["pytest", "click>=8.2"]
 
 [tool.pytest.ini_options]
 filterwarnings = [
