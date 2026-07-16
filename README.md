@@ -5,6 +5,8 @@
 [![Tests](https://github.com/nmpowell/llm-plan/actions/workflows/test.yml/badge.svg)](https://github.com/nmpowell/llm-plan/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/nmpowell/llm-plan/blob/main/LICENSE)
 
+- AI Caveat: Much of this is written with AI: Claude Code and Codex. 
+
 I've been using this for a while. It's a simple orchestrator which allows you to design plans (or "directed acyclic graphs", DAGs), or LLM calls, and send to different models. Stages of the plan can be run in parallel, or wait for one another to finish. The result is, you can ask multiple models the same question, and combine with prompts, and synthesise the answers into a cohesive final result. That "synthesise" mode is the main way I use it.
 
 Run multi-stage LLM workflows with [Simon Willison](https://simonwillison.net/)'s [LLM](https://llm.datasette.io/): a *plan*
@@ -40,6 +42,26 @@ run afterwards with `llm logs`.
 `llm-anthropic` and `llm-gemini` plugins plus the relevant keys. Preview any
 plan without spending anything using `--explain`, or dry-run the whole DAG on
 a cheap model with `-m`.)
+
+The other bundled plan, `deep_research`, expands your question into a
+comprehensive research brief, then runs Google's
+[Gemini Deep Research agent](https://ai.google.dev/gemini-api/docs/interactions/deep-research)
+on it — a script stage calling the Interactions API over plain REST, so it
+needs no extra Python dependencies:
+
+```bash
+llm plan deep_research "How do heat pump COPs hold up below -20°C?"
+```
+
+It needs a Gemini API key — `$GEMINI_API_KEY`, `$LLM_GEMINI_KEY`, or the key
+stored by `llm keys set gemini`. A Deep Research task runs
+for minutes up to an hour and may be expensive. Copy the plan into
+`llm plan path` and edit its `settings:` to switch tier.
+The report prints to stdout when done; the
+expanded brief from the first stage is reusable in other research tools via
+`llm logs --cid RUN_ID`. If the run dies while the research keeps going
+server-side, the stage's scratch directory holds `interaction_id.txt` for
+fetching the finished report by hand.
 
 ## Usage
 

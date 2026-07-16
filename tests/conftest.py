@@ -85,7 +85,13 @@ def user_dir(monkeypatch, tmp_path):
     llm_dir.mkdir()
     monkeypatch.setenv("LLM_USER_PATH", str(llm_dir))
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    for name in ("LLM_PLAN_DIRS", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+    for name in (
+        "LLM_PLAN_DIRS",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "LLM_GEMINI_KEY",
+    ):
         monkeypatch.delenv(name, raising=False)
     return llm_dir
 

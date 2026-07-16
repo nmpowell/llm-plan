@@ -1,6 +1,6 @@
 [project]
 name = "llm-plan"
-version = "0.1.1"
+version = "0.2.0"
 description = "Run multi-stage LLM workflows: DAGs of prompts and scripts with automatic output chaining"
 readme = "README.md"
 authors = [{name = "Nick Powell"}]
@@ -45,4 +45,4 @@ build-backend = "setuptools.build_meta"
 include = ["llm_plan*"]
 
 [tool.setuptools.package-data]
-llm_plan = ["plans/*.yaml", "plans/prompts/*.md"]
+llm_plan = ["plans/*.yaml", "plans/prompts/*.md", "plans/scripts/*.py"]

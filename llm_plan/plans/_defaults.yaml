@@ -20,3 +20,4 @@ models:
 
 prompts:
   synthesise: "prompts/synthesise.md"
+  expand_research: "prompts/expand_research.md"

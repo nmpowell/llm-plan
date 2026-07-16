@@ -29,6 +29,10 @@ PINNED_SYNTHESISE_SHA256 = (
     "61425345ac41aae86be956a3910dc9ba9d6c81b5c05a6c7b7b7d796b13540f5b"
 )
 
+PINNED_EXPAND_RESEARCH_SHA256 = (
+    "78523a9c605c8844876bc3db47dc56fbedcedbadf539c9c790b1c00762e22bc9"
+)
+
 
 def invoke(*args, **kwargs):
     # Unexpected exceptions should fail loudly; click errors still produce
@@ -473,6 +477,61 @@ class TestBundledPlans:
         assert result.exit_code == 0
         assert 'name: "synthesis"' in result.stdout
         assert "plan_synthesis.yaml" in result.stderr
+
+    def test_deep_research_has_the_expected_stage_structure(self):
+        from llm_plan.runner import load_plan
+        from llm_plan.store import resolve_plan
+
+        plan = load_plan(resolve_plan("deep_research"))
+
+        assert [s.name for s in plan.stages] == ["expand_prompt", "research"]
+        expand, research = plan.stages
+        assert expand.type == "llm"
+        assert expand.produces == "Expanded Deep Research Prompt"
+        assert research.type == "python_script"
+        assert research.depends_on == ["expand_prompt"]
+        assert research.produces == "Gemini Deep Research Report"
+        assert research.resolved_script is not None
+        assert research.resolved_script.is_file()
+        # The stage timeout must outlast the script's own --max-wait deadline
+        # (60 minutes, the API maximum) so the script exits with a clean error
+        # instead of being process-group-killed mid-poll.
+        assert research.timeout is not None
+        assert research.timeout > 3600
+        assert "--max-wait" in research.script_args
+        max_wait = research.script_args[research.script_args.index("--max-wait") + 1]
+        assert float(max_wait) * 60 < research.timeout
+
+    def test_the_bundled_expand_research_prompt_is_pinned(self):
+        # Same rule as the synthesis prompt: editing the bundled prompt
+        # changes what the deep_research alias does for everyone, so any
+        # edit must be deliberate.
+        import hashlib
+
+        from llm_plan.store import BUNDLED_PLAN_DIR
+
+        content = (BUNDLED_PLAN_DIR / "prompts" / "expand_research.md").read_bytes()
+
+        assert hashlib.sha256(content).hexdigest() == PINNED_EXPAND_RESEARCH_SHA256
+
+    def test_deep_research_explain_previews_the_dag_without_executing(self):
+        result = invoke(
+            "plan", "run", "deep_research", "a question", "--explain", "-m", "echo"
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "expand_prompt" in result.stdout
+        assert "deep_research.py" in result.stdout
+
+    def test_deep_research_script_fails_fast_without_an_api_key(self, tmp_path):
+        # Hermetic end-to-end wiring check: the expand stage runs on the fake
+        # echo model, then the real bundled script starts and must fail with
+        # a clear message before touching the network (the user_dir fixture
+        # guarantees GEMINI_API_KEY is unset).
+        result = invoke("plan", "run", "deep_research", "a question", "-m", "echo")
+
+        assert result.exit_code == 1
+        assert "GEMINI_API_KEY" in result.stderr
 
 
 class TestPlanList:
