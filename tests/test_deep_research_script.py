@@ -5,6 +5,7 @@ these tests replace its HTTP layer with fakes — no network, no real keys.
 """
 
 import importlib.util
+import io
 import json
 import urllib.error
 from pathlib import Path
@@ -51,8 +52,28 @@ def question_file(tmp_path, text="expanded research brief"):
     return str(path)
 
 
+_LIVE_HTTP_ERRORS = []
+
+
+@pytest.fixture(autouse=True)
+def _close_fake_http_errors():
+    yield
+    while _LIVE_HTTP_ERRORS:
+        _LIVE_HTTP_ERRORS.pop().close()
+
+
 def http_error(code):
-    return urllib.error.HTTPError("https://api.example", code, "boom", None, None)
+    # Python 3.14's HTTPError always backs itself with a real temporary file,
+    # whose implicit-cleanup ResourceWarning the suite promotes to an error —
+    # one that lands on whichever unrelated test is running when the GC fires.
+    # Every fake is therefore closed deterministically after each test; the
+    # BytesIO body keeps close() safe on 3.10-3.13 too (fp=None would leave
+    # those versions with nothing to close).
+    error = urllib.error.HTTPError(
+        "https://api.example", code, "boom", None, io.BytesIO(b"")
+    )
+    _LIVE_HTTP_ERRORS.append(error)
+    return error
 
 
 class FakeAPI:
