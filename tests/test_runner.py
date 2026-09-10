@@ -9,7 +9,9 @@ from conftest import write_plan
 
 
 class TestSingleStage:
-    def test_cli_stage_sends_instructions_and_returns_text(self, tmp_path, fake_models, run_plan):
+    def test_cli_stage_sends_instructions_and_returns_text(
+        self, tmp_path, fake_models, run_plan
+    ):
         runner, results = run_plan(
             [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}],
             CLIContext(instructions="What is love?"),
@@ -29,25 +31,32 @@ class TestSingleStage:
 
         assert fake_models.echo.stream_flags == [True]
 
-    def test_non_streaming_models_are_called_without_streaming(self, tmp_path, run_plan):
-        stages = [{"name": "solo", "summary": "s", "model": "nostream", "prompt": "CLI"}]
+    def test_non_streaming_models_are_called_without_streaming(
+        self, tmp_path, run_plan
+    ):
+        stages = [
+            {"name": "solo", "summary": "s", "model": "nostream", "prompt": "CLI"}
+        ]
 
-        runner, results = run_plan(
-            stages, CLIContext(instructions="hi")
-        )
+        runner, results = run_plan(stages, CLIContext(instructions="hi"))
 
         assert results["solo"].success, results["solo"].error
         assert results["solo"].text == "NOSTREAM-OK"
 
     def test_negative_retries_are_rejected_at_construction(self, tmp_path):
-        plan = load_plan(write_plan(
-            tmp_path, [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
-        ))
+        plan = load_plan(
+            write_plan(
+                tmp_path,
+                [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}],
+            )
+        )
 
         with pytest.raises(PlanError, match="retries"):
             PlanRunner(plan, CLIContext(), retries=-1)
 
-    def test_plain_cli_stage_with_no_cli_content_fails_helpfully(self, tmp_path, run_plan):
+    def test_plain_cli_stage_with_no_cli_content_fails_helpfully(
+        self, tmp_path, run_plan
+    ):
         runner, results = run_plan(
             [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}],
             CLIContext(),
@@ -59,7 +68,14 @@ class TestSingleStage:
 
     def test_unknown_model_fails_the_stage_with_llms_message(self, tmp_path, run_plan):
         runner, results = run_plan(
-            [{"name": "solo", "summary": "s", "model": "no-such-model", "prompt": "CLI"}],
+            [
+                {
+                    "name": "solo",
+                    "summary": "s",
+                    "model": "no-such-model",
+                    "prompt": "CLI",
+                }
+            ],
             CLIContext(instructions="hi"),
             expect_error=True,
         )
@@ -67,7 +83,9 @@ class TestSingleStage:
         assert not results["solo"].success
         assert "no-such-model" in results["solo"].error
 
-    def test_invalid_option_fails_the_stage_without_retrying(self, tmp_path, fake_models, run_plan):
+    def test_invalid_option_fails_the_stage_without_retrying(
+        self, tmp_path, fake_models, run_plan
+    ):
         stage = {
             "name": "solo",
             "summary": "s",
@@ -76,7 +94,9 @@ class TestSingleStage:
             "options": {"nonsense_option": 1},
         }
 
-        runner, results = run_plan([stage], CLIContext(instructions="hi"), expect_error=True)
+        runner, results = run_plan(
+            [stage], CLIContext(instructions="hi"), expect_error=True
+        )
 
         assert not results["solo"].success
         assert "nonsense_option" in results["solo"].error
@@ -84,7 +104,14 @@ class TestSingleStage:
 
     def test_empty_composed_prompt_is_a_stage_failure(self, tmp_path, run_plan):
         runner, results = run_plan(
-            [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"}],
+            [
+                {
+                    "name": "solo",
+                    "summary": "s",
+                    "model": "echo",
+                    "prompt": "CLI:instructions",
+                }
+            ],
             CLIContext(),
             expect_error=True,
         )
@@ -96,10 +123,20 @@ class TestSingleStage:
 class TestPromptComposition:
     def test_dependency_output_is_a_labelled_section(self, tmp_path, run_plan):
         stages = [
-            {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI",
-             "produces": "First Answer"},
-            {"name": "second", "summary": "s", "model": "echo",
-             "depends_on": ["first"], "prompt": "inline:Continue."},
+            {
+                "name": "first",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI",
+                "produces": "First Answer",
+            },
+            {
+                "name": "second",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["first"],
+                "prompt": "inline:Continue.",
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="go"))
@@ -112,8 +149,13 @@ class TestPromptComposition:
     def test_dependency_without_produces_gets_a_default_label(self, tmp_path, run_plan):
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "second", "summary": "s", "model": "echo",
-             "depends_on": ["first"], "prompt": "inline:Continue."},
+            {
+                "name": "second",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["first"],
+                "prompt": "inline:Continue.",
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="go"))
@@ -123,19 +165,31 @@ class TestPromptComposition:
     def test_chain_prompt_injects_upstream_text_with_label(self, tmp_path, run_plan):
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "second", "summary": "s", "model": "echo", "depends_on": ["first"],
-             "prompt": [{"prompt": "chain:first", "label": "Earlier Analysis"}]},
+            {
+                "name": "second",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["first"],
+                "prompt": [{"prompt": "chain:first", "label": "Earlier Analysis"}],
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="go"))
 
         assert "## Earlier Analysis" in results["second"].text
 
-    def test_a_chain_consumed_dependency_is_not_also_auto_fenced(self, tmp_path, run_plan):
+    def test_a_chain_consumed_dependency_is_not_also_auto_fenced(
+        self, tmp_path, run_plan
+    ):
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "second", "summary": "s", "model": "echo", "depends_on": ["first"],
-             "prompt": [{"prompt": "chain:first", "label": "Earlier Analysis"}]},
+            {
+                "name": "second",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["first"],
+                "prompt": [{"prompt": "chain:first", "label": "Earlier Analysis"}],
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="go"))
@@ -152,8 +206,13 @@ class TestPromptComposition:
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
             {"name": "detour", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "third", "summary": "s", "model": "echo", "depends_on": ["detour"],
-             "prompt": [{"prompt": "chain:first", "label": "First Take"}]},
+            {
+                "name": "third",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["detour"],
+                "prompt": [{"prompt": "chain:first", "label": "First Take"}],
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="go"))
@@ -162,13 +221,19 @@ class TestPromptComposition:
         assert "## First Take" in text
         assert "## Output from detour" in text
 
-    def test_stage_files_and_prompt_files_are_labelled_sections(self, tmp_path, run_plan):
+    def test_stage_files_and_prompt_files_are_labelled_sections(
+        self, tmp_path, run_plan
+    ):
         (tmp_path / "ctx.md").write_text("the context", encoding="utf-8")
         (tmp_path / "guide.md").write_text("the guide", encoding="utf-8")
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo",
-             "prompt": ["guide.md"],
-             "files": [{"path": "ctx.md", "label": "Context"}]},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": ["guide.md"],
+                "files": [{"path": "ctx.md", "label": "Context"}],
+            },
         ]
 
         runner, results = run_plan(stages)
@@ -178,12 +243,18 @@ class TestPromptComposition:
         assert "## MAIN INSTRUCTIONS" in text and "the guide" in text
         assert text.index("the context") < text.index("the guide")
 
-    def test_a_binary_context_file_fails_naming_the_stage_and_file(self, tmp_path, run_plan):
+    def test_a_binary_context_file_fails_naming_the_stage_and_file(
+        self, tmp_path, run_plan
+    ):
         (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00\x01")
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo",
-             "prompt": "inline:Describe the input.",
-             "files": [{"path": "binary.bin"}]},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "inline:Describe the input.",
+                "files": [{"path": "binary.bin"}],
+            },
         ]
 
         runner, results = run_plan(stages, expect_error=True)
@@ -195,8 +266,13 @@ class TestPromptComposition:
     def test_prompt_label_renames_the_first_prompt_file(self, tmp_path, run_plan):
         (tmp_path / "guide.md").write_text("the guide", encoding="utf-8")
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo",
-             "prompt": "guide.md", "prompt_label": "Instructions"},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "guide.md",
+                "prompt_label": "Instructions",
+            },
         ]
 
         runner, results = run_plan(stages)
@@ -205,8 +281,14 @@ class TestPromptComposition:
 
     def test_labelled_cli_instructions_get_their_heading(self, tmp_path, run_plan):
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo",
-             "prompt": [{"prompt": "CLI:instructions", "label": "Original Question"}]},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": [
+                    {"prompt": "CLI:instructions", "label": "Original Question"}
+                ],
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="why?"))
@@ -214,7 +296,9 @@ class TestPromptComposition:
         assert "## Original Question" in results["solo"].text
         assert "why?" in results["solo"].text
 
-    def test_headed_instruction_parts_render_with_their_headings(self, tmp_path, run_plan):
+    def test_headed_instruction_parts_render_with_their_headings(
+        self, tmp_path, run_plan
+    ):
         stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
         cli = CLIContext(
             instructions="the main question",
@@ -231,20 +315,31 @@ class TestPromptComposition:
 
 
 class TestGoldenComposition:
-    def test_composed_prompt_matches_the_pinned_shape_exactly(self, tmp_path, fake_models, run_plan):
+    def test_composed_prompt_matches_the_pinned_shape_exactly(
+        self, tmp_path, fake_models, run_plan
+    ):
         (tmp_path / "ctx.md").write_text("context body\n", encoding="utf-8")
         (tmp_path / "guide.md").write_text("guide body\n", encoding="utf-8")
         stages = [
-            {"name": "analyst", "summary": "s", "model": "echo", "prompt": "CLI",
-             "produces": "Analysis"},
-            {"name": "synthesis", "summary": "s", "model": "echo",
-             "depends_on": ["analyst"],
-             "files": [{"path": "ctx.md", "label": "Context"}],
-             "prompt": [
-                 {"prompt": "CLI:instructions", "label": "Original Question"},
-                 {"prompt": "guide.md", "label": "Guidelines"},
-                 "inline:Also consider tone.",
-             ]},
+            {
+                "name": "analyst",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI",
+                "produces": "Analysis",
+            },
+            {
+                "name": "synthesis",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["analyst"],
+                "files": [{"path": "ctx.md", "label": "Context"}],
+                "prompt": [
+                    {"prompt": "CLI:instructions", "label": "Original Question"},
+                    {"prompt": "guide.md", "label": "Guidelines"},
+                    "inline:Also consider tone.",
+                ],
+            },
         ]
 
         run_plan(stages, CLIContext(instructions="the question"))
@@ -269,7 +364,9 @@ class TestGoldenComposition:
 
         assert fake_models.echo.prompts[0].prompt == "just the question"
 
-    def test_a_lone_cli_prompt_keeps_its_whitespace(self, tmp_path, fake_models, run_plan):
+    def test_a_lone_cli_prompt_keeps_its_whitespace(
+        self, tmp_path, fake_models, run_plan
+    ):
         piped_code = "    def f():\n        return 1\n"
 
         stages = [{"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI"}]
@@ -279,11 +376,18 @@ class TestGoldenComposition:
 
 
 class TestCliContextRouting:
-    def test_fragments_reach_cli_stages_but_not_downstream_stages(self, tmp_path, fake_models, run_plan):
+    def test_fragments_reach_cli_stages_but_not_downstream_stages(
+        self, tmp_path, fake_models, run_plan
+    ):
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "second", "summary": "s", "model": "echo",
-             "depends_on": ["first"], "prompt": "inline:Continue."},
+            {
+                "name": "second",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["first"],
+                "prompt": "inline:Continue.",
+            },
         ]
         cli = CLIContext(instructions="go", fragments=["seed fragment text"])
 
@@ -294,9 +398,16 @@ class TestCliContextRouting:
         assert first_prompt.fragments == ["seed fragment text"]
         assert second_prompt.fragments == []
 
-    def test_cli_instructions_variant_excludes_fragments(self, tmp_path, fake_models, run_plan):
+    def test_cli_instructions_variant_excludes_fragments(
+        self, tmp_path, fake_models, run_plan
+    ):
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI:instructions",
+            },
         ]
         cli = CLIContext(instructions="go", fragments=["seed fragment text"])
 
@@ -307,8 +418,13 @@ class TestCliContextRouting:
     def test_seed_dependency_grants_cli_context(self, tmp_path, fake_models, run_plan):
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "late", "summary": "s", "model": "echo",
-             "depends_on": ["seed"], "prompt": "inline:Look at the fragments."},
+            {
+                "name": "late",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["seed"],
+                "prompt": "inline:Look at the fragments.",
+            },
         ]
         cli = CLIContext(instructions="go", fragments=["seed fragment text"])
 
@@ -318,10 +434,15 @@ class TestCliContextRouting:
         assert late_prompt.fragments == ["seed fragment text"]
 
     def test_first_stage_without_a_cli_prompt_still_receives_seed_files(
-        self, tmp_path, fake_models
-    , run_plan):
+        self, tmp_path, fake_models, run_plan
+    ):
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo", "prompt": "inline:Describe input."},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "inline:Describe input.",
+            },
         ]
         cli = CLIContext(fragments=["seed fragment text"])
 
@@ -329,15 +450,24 @@ class TestCliContextRouting:
 
         assert fake_models.echo.prompts[0].fragments == ["seed fragment text"]
 
-    def test_attachments_follow_the_same_routing(self, tmp_path, fake_models, png_bytes, run_plan):
+    def test_attachments_follow_the_same_routing(
+        self, tmp_path, fake_models, png_bytes, run_plan
+    ):
         image = tmp_path / "img.png"
         image.write_bytes(png_bytes)
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            {"name": "second", "summary": "s", "model": "echo",
-             "depends_on": ["first"], "prompt": "inline:Continue."},
+            {
+                "name": "second",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["first"],
+                "prompt": "inline:Continue.",
+            },
         ]
-        cli = CLIContext(instructions="go", attachments=[llm.Attachment(path=str(image))])
+        cli = CLIContext(
+            instructions="go", attachments=[llm.Attachment(path=str(image))]
+        )
 
         runner, results = run_plan(stages, cli)
 
@@ -350,7 +480,12 @@ class TestSeedRoutingWarnings:
     def test_warns_when_no_stage_will_receive_cli_files(self, tmp_path, run_plan):
         messages = []
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI:instructions",
+            },
         ]
         cli = CLIContext(instructions="hi", fragments=["seed fragment text"])
 
@@ -370,7 +505,12 @@ class TestSeedRoutingWarnings:
     def test_no_warning_when_only_instructions_were_provided(self, tmp_path, run_plan):
         messages = []
         stages = [
-            {"name": "solo", "summary": "s", "model": "echo", "prompt": "CLI:instructions"},
+            {
+                "name": "solo",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI:instructions",
+            },
         ]
 
         run_plan(stages, CLIContext(instructions="hi"), progress=messages.append)
@@ -413,7 +553,9 @@ class TestModelsAndOptions:
             "options": {"nonsense_option": 1},
         }
 
-        runner, results = run_plan([stage], CLIContext(instructions="hi"), expect_error=True)
+        runner, results = run_plan(
+            [stage], CLIContext(instructions="hi"), expect_error=True
+        )
 
         error = results["solo"].error
         assert "nonsense_option" in error
@@ -421,8 +563,13 @@ class TestModelsAndOptions:
 
     def test_cli_options_override_stage_options(self, tmp_path, fake_models, run_plan):
         stages = [
-            {"name": "a", "summary": "s", "model": "echo", "prompt": "CLI",
-             "options": {"temperature": 0.0, "max_tokens": 100}},
+            {
+                "name": "a",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI",
+                "options": {"temperature": 0.0, "max_tokens": 100},
+            },
         ]
         cli = CLIContext(instructions="hi", options={"temperature": 0.7})
 
@@ -434,7 +581,9 @@ class TestModelsAndOptions:
 
 
 class TestFailureHandling:
-    def test_transient_failure_is_retried_then_succeeds(self, tmp_path, fake_models, run_plan):
+    def test_transient_failure_is_retried_then_succeeds(
+        self, tmp_path, fake_models, run_plan
+    ):
         fake_models.flaky.failures_left = 2
         stages = [{"name": "solo", "summary": "s", "model": "flaky", "prompt": "CLI"}]
 
@@ -443,26 +592,38 @@ class TestFailureHandling:
         assert results["solo"].success
         assert fake_models.flaky.calls == 3
 
-    def test_a_missing_api_key_fails_the_stage_without_retrying(self, tmp_path, fake_models, run_plan):
-        stages = [{"name": "solo", "summary": "s", "model": "needskey", "prompt": "CLI"}]
+    def test_a_missing_api_key_fails_the_stage_without_retrying(
+        self, tmp_path, fake_models, run_plan
+    ):
+        stages = [
+            {"name": "solo", "summary": "s", "model": "needskey", "prompt": "CLI"}
+        ]
 
-        runner, results = run_plan(stages, CLIContext(instructions="hi"), expect_error=True)
+        runner, results = run_plan(
+            stages, CLIContext(instructions="hi"), expect_error=True
+        )
 
         assert not results["solo"].success
         assert "key" in results["solo"].error.lower()
         assert fake_models.needskey.calls == 1
 
-    def test_a_tolerant_stage_omits_a_failed_chain_section(self, tmp_path, fake_models, run_plan):
+    def test_a_tolerant_stage_omits_a_failed_chain_section(
+        self, tmp_path, fake_models, run_plan
+    ):
         fake_models.raising.exception = ValueError("producer broke")
 
         stages = [
             {"name": "producer", "summary": "s", "model": "raising", "prompt": "CLI"},
-            {"name": "consumer", "summary": "s", "model": "echo",
-             "partial_dependencies": True,
-             "prompt": [
-                 {"prompt": "chain:producer", "label": "Producer Output"},
-                 "inline:Carry on without it.",
-             ]},
+            {
+                "name": "consumer",
+                "summary": "s",
+                "model": "echo",
+                "partial_dependencies": True,
+                "prompt": [
+                    {"prompt": "chain:producer", "label": "Producer Output"},
+                    "inline:Carry on without it.",
+                ],
+            },
         ]
         runner, results = run_plan(stages, CLIContext(instructions="go"))
 
@@ -471,7 +632,9 @@ class TestFailureHandling:
         assert "Producer Output" not in results["consumer"].text
         assert "Carry on without it." in results["consumer"].text
 
-    def test_a_stage_without_a_model_runs_on_llms_default(self, tmp_path, fake_models, run_plan):
+    def test_a_stage_without_a_model_runs_on_llms_default(
+        self, tmp_path, fake_models, run_plan
+    ):
         llm.set_default_model("echo")
 
         stages = [{"name": "solo", "summary": "s", "prompt": "CLI"}]
@@ -480,43 +643,64 @@ class TestFailureHandling:
         assert results["solo"].success
         assert fake_models.echo.prompts[0].prompt == "hi"
 
-    @pytest.mark.parametrize("exception", [
-        ValueError("unsupported attachment type"),
-        NotImplementedError("this model cannot use tools"),
-        TypeError("unexpected keyword argument"),
-    ], ids=["ValueError", "NotImplementedError", "TypeError"])
+    @pytest.mark.parametrize(
+        "exception",
+        [
+            ValueError("unsupported attachment type"),
+            NotImplementedError("this model cannot use tools"),
+            TypeError("unexpected keyword argument"),
+        ],
+        ids=["ValueError", "NotImplementedError", "TypeError"],
+    )
     def test_a_validation_style_error_fails_the_stage_without_retrying(
         self, tmp_path, fake_models, run_plan, exception
     ):
         fake_models.raising.exception = exception
 
         stages = [{"name": "solo", "summary": "s", "model": "raising", "prompt": "CLI"}]
-        runner, results = run_plan(stages, CLIContext(instructions="hi"), expect_error=True)
+        runner, results = run_plan(
+            stages, CLIContext(instructions="hi"), expect_error=True
+        )
 
         assert not results["solo"].success
         assert str(exception) in results["solo"].error
         assert fake_models.raising.calls == 1
 
-    def test_failure_after_retries_exhausted_fails_the_stage(self, tmp_path, fake_models, run_plan):
+    def test_failure_after_retries_exhausted_fails_the_stage(
+        self, tmp_path, fake_models, run_plan
+    ):
         fake_models.flaky.failures_left = 10
         stages = [{"name": "solo", "summary": "s", "model": "flaky", "prompt": "CLI"}]
 
-        runner, results = run_plan(stages, CLIContext(instructions="hi"), expect_error=True)
+        runner, results = run_plan(
+            stages, CLIContext(instructions="hi"), expect_error=True
+        )
 
         assert not results["solo"].success
         assert "transient upstream error" in results["solo"].error
         assert fake_models.flaky.calls == 3
 
     def test_intolerant_dependents_after_a_tolerated_failure_are_skipped(
-        self, tmp_path, fake_models
-    , run_plan):
+        self, tmp_path, fake_models, run_plan
+    ):
         fake_models.flaky.failures_left = 10
         stages = [
             {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
-            {"name": "rescue", "summary": "s", "model": "echo", "prompt": "CLI",
-             "depends_on": ["bad"], "partial_dependencies": True},
-            {"name": "after", "summary": "s", "model": "echo",
-             "depends_on": ["bad"], "prompt": "inline:Continue."},
+            {
+                "name": "rescue",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI",
+                "depends_on": ["bad"],
+                "partial_dependencies": True,
+            },
+            {
+                "name": "after",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["bad"],
+                "prompt": "inline:Continue.",
+            },
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="hi"))
@@ -527,16 +711,26 @@ class TestFailureHandling:
 
     @pytest.mark.parametrize("max_workers", [1, 4], ids=["sequential", "parallel"])
     def test_partial_dependencies_joins_only_surviving_outputs(
-        self, tmp_path, fake_models, max_workers
-    , run_plan):
+        self, tmp_path, fake_models, max_workers, run_plan
+    ):
         fake_models.flaky.failures_left = 10
         stages = [
-            {"name": "good", "summary": "s", "model": "echo", "prompt": "CLI",
-             "produces": "Good Analysis"},
+            {
+                "name": "good",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI",
+                "produces": "Good Analysis",
+            },
             {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
-            {"name": "synthesis", "summary": "s", "model": "echo",
-             "depends_on": ["bad", "good"], "partial_dependencies": True,
-             "prompt": "inline:Synthesise."},
+            {
+                "name": "synthesis",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["bad", "good"],
+                "partial_dependencies": True,
+                "prompt": "inline:Synthesise.",
+            },
         ]
 
         runner, results = run_plan(
@@ -549,13 +743,19 @@ class TestFailureHandling:
 
     @pytest.mark.parametrize("max_workers", [1, 4], ids=["sequential", "parallel"])
     def test_continue_on_failure_dependents_run_after_a_failed_dependency(
-        self, tmp_path, fake_models, max_workers
-    , run_plan):
+        self, tmp_path, fake_models, max_workers, run_plan
+    ):
         fake_models.flaky.failures_left = 10
         stages = [
             {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
-            {"name": "rescue", "summary": "s", "model": "echo", "prompt": "CLI",
-             "depends_on": ["bad"], "continue_on_failure": True},
+            {
+                "name": "rescue",
+                "summary": "s",
+                "model": "echo",
+                "prompt": "CLI",
+                "depends_on": ["bad"],
+                "continue_on_failure": True,
+            },
         ]
 
         runner, results = run_plan(
@@ -620,8 +820,15 @@ class TestLoadPlan:
     def test_load_plan_validates_the_dag(self, tmp_path):
         plan_file = write_plan(
             tmp_path,
-            [{"name": "a", "summary": "s", "model": "echo", "prompt": "CLI",
-              "depends_on": ["ghost"]}],
+            [
+                {
+                    "name": "a",
+                    "summary": "s",
+                    "model": "echo",
+                    "prompt": "CLI",
+                    "depends_on": ["ghost"],
+                }
+            ],
         )
 
         with pytest.raises(PlanError, match="ghost"):
@@ -632,8 +839,15 @@ class TestLoadPlan:
         script.write_text("", encoding="utf-8")
         plan_file = write_plan(
             tmp_path,
-            [{"name": "a", "summary": "s", "type": "python_script", "script": "s.py",
-              "script_args": ["${cli.nonsense}"]}],
+            [
+                {
+                    "name": "a",
+                    "summary": "s",
+                    "type": "python_script",
+                    "script": "s.py",
+                    "script_args": ["${cli.nonsense}"],
+                }
+            ],
         )
 
         with pytest.raises(PlanError, match="cli.nonsense"):
@@ -644,17 +858,29 @@ class TestLoadPlan:
         script.write_text("", encoding="utf-8")
         plan_file = write_plan(
             tmp_path,
-            [{"name": "a", "summary": "s", "type": "python_script", "script": "s.py",
-              "env": {"CUSTOM_VAR": "${cli.bogus}"}}],
+            [
+                {
+                    "name": "a",
+                    "summary": "s",
+                    "type": "python_script",
+                    "script": "s.py",
+                    "env": {"CUSTOM_VAR": "${cli.bogus}"},
+                }
+            ],
         )
 
         with pytest.raises(PlanError, match="cli.bogus"):
             load_plan(plan_file)
 
-    @pytest.mark.parametrize("reserved", [
-        "LLM_PLAN_OUTPUT_DIR", "LLM_PLAN_RUN_ID",
-        "LLM_PLAN_STAGE_NAME", "LLM_PLAN_INSTRUCTIONS",
-    ])
+    @pytest.mark.parametrize(
+        "reserved",
+        [
+            "LLM_PLAN_OUTPUT_DIR",
+            "LLM_PLAN_RUN_ID",
+            "LLM_PLAN_STAGE_NAME",
+            "LLM_PLAN_INSTRUCTIONS",
+        ],
+    )
     def test_load_plan_rejects_reserved_env_names(self, tmp_path, reserved):
         # Overriding LLM_PLAN_OUTPUT_DIR would let two parallel stages share
         # an output directory again - the runner owns these variables.
@@ -662,17 +888,28 @@ class TestLoadPlan:
         script.write_text("", encoding="utf-8")
         plan_file = write_plan(
             tmp_path,
-            [{"name": "a", "summary": "s", "type": "python_script", "script": "s.py",
-              "env": {reserved: "/tmp/shared"}}],
+            [
+                {
+                    "name": "a",
+                    "summary": "s",
+                    "type": "python_script",
+                    "script": "s.py",
+                    "env": {reserved: "/tmp/shared"},
+                }
+            ],
         )
 
         with pytest.raises(PlanError, match=reserved):
             load_plan(plan_file)
 
-    @pytest.mark.parametrize("prompt", [
-        "inline:Write results into ${run.output_dir}",
-        [{"prompt": "inline:Run ${cli.run_id}", "label": "Task"}],
-    ], ids=["scalar", "list"])
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "inline:Write results into ${run.output_dir}",
+            [{"prompt": "inline:Run ${cli.run_id}", "label": "Task"}],
+        ],
+        ids=["scalar", "list"],
+    )
     def test_load_plan_rejects_runtime_tokens_in_llm_prompts(self, tmp_path, prompt):
         plan_file = write_plan(
             tmp_path,

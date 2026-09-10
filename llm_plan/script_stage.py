@@ -184,7 +184,11 @@ def run_id() -> str | None:
 
 
 def emit_outputs(
-    outputs: list[Any], *, metadata: dict | None = None, manifest: bool = True, stream=None
+    outputs: list[Any],
+    *,
+    metadata: dict | None = None,
+    manifest: bool = True,
+    stream=None,
 ) -> None:
     """Print produced output paths to stdout for the plan runner.
 

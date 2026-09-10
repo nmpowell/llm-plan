@@ -22,7 +22,12 @@ def minimal_plan(**overrides):
         "name": "test",
         "summary": "a test plan",
         "stages": [
-            {"name": "first", "summary": "first stage", "model": "echo", "prompt": "CLI"},
+            {
+                "name": "first",
+                "summary": "first stage",
+                "model": "echo",
+                "prompt": "CLI",
+            },
         ],
     }
     data.update(overrides)
@@ -31,7 +36,9 @@ def minimal_plan(**overrides):
 
 class TestLoadWithExtends:
     def test_merges_defaults_underneath_the_plan(self, tmp_path):
-        write_yaml(tmp_path / "_defaults.yaml", {"models": {"fast": "echo", "slow": "opus"}})
+        write_yaml(
+            tmp_path / "_defaults.yaml", {"models": {"fast": "echo", "slow": "opus"}}
+        )
         plan_file = write_yaml(
             tmp_path / "plan.yaml",
             {"extends": "_defaults.yaml", "models": {"slow": "sonnet"}, "name": "p"},
@@ -167,10 +174,16 @@ class TestParsePromptList:
         ]
 
         spec = parse_prompt_list(
-            prompt, "stage", [(None, "the question")], completed_text={}, base_dir=tmp_path
+            prompt,
+            "stage",
+            [(None, "the question")],
+            completed_text={},
+            base_dir=tmp_path,
         )
 
-        assert [(f.label, f.path.name) for f in spec.prompt_files] == [("Guidelines", "guide.md")]
+        assert [(f.label, f.path.name) for f in spec.prompt_files] == [
+            ("Guidelines", "guide.md")
+        ]
         assert spec.sections == [
             ("Original Question", "the question"),
             (None, "Also consider Y"),
@@ -225,9 +238,7 @@ class TestParsePromptList:
 
     def test_yaml_inline_mapping_trap_gets_a_helpful_error(self):
         with pytest.raises(PlanError, match='"inline:'):
-            parse_prompt_list(
-                [{"inline": "some text"}], "stage", [], completed_text={}
-            )
+            parse_prompt_list([{"inline": "some text"}], "stage", [], completed_text={})
 
 
 class TestParsePlan:
@@ -260,17 +271,23 @@ class TestParsePlan:
         data["stages"][0]["model"] = "${missing.value}"
         plan_file = write_yaml(tmp_path / "plan.yaml", data)
 
-        with pytest.raises(PlanError, match=r"Variable '\$\{missing\.value\}' not found"):
+        with pytest.raises(
+            PlanError, match=r"Variable '\$\{missing\.value\}' not found"
+        ):
             parse_plan(plan_file)
 
     def test_runtime_tokens_pass_through_untouched_without_namespaces(self, tmp_path):
         data = minimal_plan()
-        data["stages"][0]["prompt"] = "inline:${cli.instructions} into ${run.output_dir}"
+        data["stages"][0]["prompt"] = (
+            "inline:${cli.instructions} into ${run.output_dir}"
+        )
         plan_file = write_yaml(tmp_path / "plan.yaml", data)
 
         plan = parse_plan(plan_file)
 
-        assert plan.stages[0].prompt == "inline:${cli.instructions} into ${run.output_dir}"
+        assert (
+            plan.stages[0].prompt == "inline:${cli.instructions} into ${run.output_dir}"
+        )
 
     def test_reads_parallel_config_max_workers(self, tmp_path):
         plan_file = write_yaml(
@@ -282,7 +299,8 @@ class TestParsePlan:
     @pytest.mark.parametrize("bad_value", [0, -2, True, 2.9, "many"])
     def test_invalid_max_workers_is_an_error(self, tmp_path, bad_value):
         plan_file = write_yaml(
-            tmp_path / "plan.yaml", minimal_plan(parallel_config={"max_workers": bad_value})
+            tmp_path / "plan.yaml",
+            minimal_plan(parallel_config={"max_workers": bad_value}),
         )
 
         with pytest.raises(PlanError, match="max_workers"):
@@ -533,7 +551,9 @@ class TestParsePlan:
             parse_plan(plan_file)
 
     @pytest.mark.parametrize(
-        "bad_entry", ["context.md", {"label": "Context"}], ids=["bare-string", "no-path"]
+        "bad_entry",
+        ["context.md", {"label": "Context"}],
+        ids=["bare-string", "no-path"],
     )
     def test_malformed_files_entry_is_a_plan_error(self, tmp_path, bad_entry):
         data = minimal_plan()

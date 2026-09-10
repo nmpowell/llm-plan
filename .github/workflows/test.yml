@@ -14,43 +14,52 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
+          enable-cache: true
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - name: Install dependencies
-        run: |
-          pip install -e '.[test]'
-      - name: Run tests
-        run: |
-          python -m pytest
-  test-llm-floor:
-    # The declared minimums together: oldest Python with oldest llm.
+      - run: uv sync --locked
+      - run: uv run pytest
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+  test-llm-floor:
+    # The declared minimums together: oldest Python with oldest llm.
+    # Installed unlocked with uv pip, because the lockfile pins a newer llm.
+    # llm 0.31 imports httpx without declaring it; openai < 3 supplied it and
+    # openai 3 moved to httpx2, so a fresh 0.31 install needs the openai pin.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
           python-version: "3.10"
-      - name: Install dependencies with the minimum supported llm
+      - name: Install with the minimum supported llm
         run: |
-          pip install -e '.[test]' 'llm==0.31'
-      - name: Run tests
-        run: |
-          python -m pytest
+          uv venv
+          uv pip install -e '.[test]' 'llm==0.31' 'openai<3'
+      - run: uv run --no-sync pytest
   test-llm-prerelease:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
+          enable-cache: true
           python-version: "3.14"
-      - name: Install dependencies with llm pre-release
+      - name: Install with the llm pre-release
         run: |
-          pip install -e '.[test]'
-          pip install --pre --upgrade llm
-      - name: Run tests
-        run: |
-          python -m pytest
+          uv venv
+          uv pip install -e '.[test]'
+          uv pip install --pre --upgrade llm
+      - run: uv run --no-sync pytest

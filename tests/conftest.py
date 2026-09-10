@@ -62,7 +62,9 @@ def run_plan(tmp_path):
         }
         plan_file = tmp_path / "plan.yaml"
         plan_file.write_text(yaml.safe_dump(data), encoding="utf-8")
-        runner = PlanRunner(load_plan(plan_file), cli or CLIContext(), retry_delay=0, **runner_kwargs)
+        runner = PlanRunner(
+            load_plan(plan_file), cli or CLIContext(), retry_delay=0, **runner_kwargs
+        )
         if expect_error:
             with pytest.raises(PlanError):
                 runner.run()

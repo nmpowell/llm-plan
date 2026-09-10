@@ -46,14 +46,36 @@ class TestParallelExecution:
         runner = parallel_plan(
             tmp_path,
             [
-                {"name": "root", "summary": "s", "model": "echo", "prompt": "CLI",
-                 "produces": "Root"},
-                {"name": "left", "summary": "s", "model": "echo", "depends_on": ["root"],
-                 "prompt": "inline:left work", "produces": "Left View"},
-                {"name": "right", "summary": "s", "model": "echo", "depends_on": ["root"],
-                 "prompt": "inline:right work", "produces": "Right View"},
-                {"name": "join", "summary": "s", "model": "echo",
-                 "depends_on": ["left", "right"], "prompt": "inline:combine"},
+                {
+                    "name": "root",
+                    "summary": "s",
+                    "model": "echo",
+                    "prompt": "CLI",
+                    "produces": "Root",
+                },
+                {
+                    "name": "left",
+                    "summary": "s",
+                    "model": "echo",
+                    "depends_on": ["root"],
+                    "prompt": "inline:left work",
+                    "produces": "Left View",
+                },
+                {
+                    "name": "right",
+                    "summary": "s",
+                    "model": "echo",
+                    "depends_on": ["root"],
+                    "prompt": "inline:right work",
+                    "produces": "Right View",
+                },
+                {
+                    "name": "join",
+                    "summary": "s",
+                    "model": "echo",
+                    "depends_on": ["left", "right"],
+                    "prompt": "inline:combine",
+                },
             ],
         )
 
@@ -82,21 +104,44 @@ class TestExclusive:
         runner = parallel_plan(
             tmp_path,
             [
-                {"name": "one", "summary": "s", "model": "timing",
-                 "prompt": "inline:one", "depends_on": ["seed"]},
-                {"name": "two", "summary": "s", "model": "timing",
-                 "prompt": "inline:two", "depends_on": ["seed"]},
-                {"name": "alone", "summary": "s", "model": "timing",
-                 "prompt": "inline:alone", "depends_on": ["seed"], "exclusive": True},
-                {"name": "after", "summary": "s", "model": "timing",
-                 "prompt": "inline:after", "depends_on": ["seed"]},
+                {
+                    "name": "one",
+                    "summary": "s",
+                    "model": "timing",
+                    "prompt": "inline:one",
+                    "depends_on": ["seed"],
+                },
+                {
+                    "name": "two",
+                    "summary": "s",
+                    "model": "timing",
+                    "prompt": "inline:two",
+                    "depends_on": ["seed"],
+                },
+                {
+                    "name": "alone",
+                    "summary": "s",
+                    "model": "timing",
+                    "prompt": "inline:alone",
+                    "depends_on": ["seed"],
+                    "exclusive": True,
+                },
+                {
+                    "name": "after",
+                    "summary": "s",
+                    "model": "timing",
+                    "prompt": "inline:after",
+                    "depends_on": ["seed"],
+                },
             ],
         )
 
         results = by_name(runner.run())
 
         assert all(r.success for r in results.values())
-        intervals = {text: (start, end) for text, start, end in fake_models.timing.intervals}
+        intervals = {
+            text: (start, end) for text, start, end in fake_models.timing.intervals
+        }
         assert len(intervals) == 4
         alone_start, alone_end = intervals.pop("alone")
         for text, (start, end) in intervals.items():
@@ -165,7 +210,9 @@ class TestParallelFailures:
         def failing_log(stage, response):
             raise RuntimeError("logs.db is broken")
 
-        stages = [{"name": "fast", "summary": "s", "model": "echo", "prompt": "CLI"}] + [
+        stages = [
+            {"name": "fast", "summary": "s", "model": "echo", "prompt": "CLI"}
+        ] + [
             {"name": f"held{i}", "summary": "s", "model": "hold", "prompt": "CLI"}
             for i in range(4)
         ]
@@ -189,11 +236,26 @@ class TestParallelFailures:
             tmp_path,
             [
                 {"name": "bad", "summary": "s", "model": "flaky", "prompt": "CLI"},
-                {"name": "child", "summary": "s", "model": "echo",
-                 "depends_on": ["bad"], "prompt": "inline:child"},
-                {"name": "grandchild", "summary": "s", "model": "echo",
-                 "depends_on": ["child"], "prompt": "inline:grandchild"},
-                {"name": "independent", "summary": "s", "model": "echo", "prompt": "CLI"},
+                {
+                    "name": "child",
+                    "summary": "s",
+                    "model": "echo",
+                    "depends_on": ["bad"],
+                    "prompt": "inline:child",
+                },
+                {
+                    "name": "grandchild",
+                    "summary": "s",
+                    "model": "echo",
+                    "depends_on": ["child"],
+                    "prompt": "inline:grandchild",
+                },
+                {
+                    "name": "independent",
+                    "summary": "s",
+                    "model": "echo",
+                    "prompt": "CLI",
+                },
             ],
         )
 

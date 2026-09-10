@@ -11,17 +11,19 @@ The README is the authoritative reference for user-facing behaviour: plan YAML f
 ## Commands
 
 ```bash
-# Setup (a dev venv usually already exists at .venv/)
-uv venv && uv pip install -e '.[test]'
+# Setup: creates .venv/ from uv.lock with the `dev` group (pytest, ruff, click>=8.2)
+uv sync --locked
 
 # Tests — hermetic: fake in-process models, no network, no API keys
-.venv/bin/python -m pytest                                  # full suite (~322 tests, fast)
-.venv/bin/python -m pytest tests/test_runner.py             # one file
-.venv/bin/python -m pytest tests/test_parser.py -k chain    # by keyword
+uv run pytest                                  # full suite (~322 tests, fast)
+uv run pytest tests/test_runner.py             # one file
+uv run pytest tests/test_parser.py -k chain    # by keyword
 
-# Lint (no project config; ruff defaults)
-ruff check llm_plan tests
+# Lint and format (rule set pinned in pyproject; CI gates on both)
+uv run ruff check . && uv run ruff format --check .
 ```
+
+`pip install -e '.[test]'` still works for a pip-only environment. Changing `dependencies` or the `dev` group means running `uv lock` and committing `uv.lock`, or CI's `uv sync --locked` fails.
 
 Exercising the real CLI (the plugin is installed editable into `.venv`):
 
@@ -52,6 +54,7 @@ Execution flows through the modules in this order:
 - **Dependency edges come from three places** (`dag.resolve_dependencies`): explicit `depends_on`; an implicit edge to the previously listed stage when a non-first stage has neither `depends_on` nor a `CLI` prompt; and `chain:` prompt items. A `chain:` dependency's text is placed only where the item puts it — it is excluded from the auto-fenced dependency sections so the same text is never sent (and billed) twice.
 - **Chaining is in-memory** for LLM stages; nothing is written to disk. Script stages get each LLM dependency's text materialised as `<dep>.md` inside the stage's *own* scratch subdirectory — stages never share one (parallel stages sharing a directory previously raced).
 - **Parallel mode: workers only execute.** Results are collected, chained, and logged on the coordinating thread. `exclusive` stages drain in-flight work and run alone. On any abort, a latched flag (`_scripts_aborted`) plus process-group SIGKILL prevents a mid-spawn script escaping, and the executor shuts down with `cancel_futures` so queued stages aren't billed.
+- **Two logging schemas.** llm 0.31 writes the legacy `conversations`/`responses` tables; llm >= 0.32 writes `threads`/`turns` through `LogStore`, and `Response.log_to_db` derives the thread name from the first prompt, ignoring `Conversation.name`. `logs.py` names the run's row in whichever table has it. Tests read the log tables through the schema-aware helpers in `test_cli.py`, never a table name directly.
 - **Logging is a promise, not best-effort.** One `llm.Conversation` per run (id = the full-uuid run id) so `llm logs --cid RUN_ID` retrieves the whole run; a logging failure fails the command (exit 1) after printing leaf output. Upstream quirks handled in `logs.py`: `log_to_db` ignores `Conversation.name` (the name column is updated manually) and the finished response must be appended to `conversation.responses` explicitly.
 - **llm 0.31 compatibility:** model options pass to `model.prompt()` as `**kwargs` (0.31 has no `options=`), and `stream=True` is set only on `can_stream` models (Anthropic's SDK rejects non-streaming long requests). Retries skip deterministic failures (`NeedsKeyException`, `ValueError`, `NotImplementedError`, `TypeError`); `LLM_RAISE_ERRORS=1` re-raises immediately (llm's debugging convention).
 - Stage names become scratch directory names — that's why the parser rejects separators/dot components in `name`.
@@ -63,12 +66,13 @@ Development here is red-first TDD: write the failing test, then the fix.
 - `conftest.py` sets `LLM_LOAD_PLUGINS=llm-plan` *before anything imports llm* (llm reads it once at import time) and registers throwaway in-process models per test — `echo` (echoes its composed prompt, for asserting composition), `flaky`, `hold`, `nostream`, `needskey`, `pair`/`timing` (parallelism proofs), etc. An autouse fixture sandboxes `LLM_USER_PATH`, tempdirs, and provider key env vars.
 - `pyproject.toml` promotes `ResourceWarning` (and its unraisable wrapper) to errors — leaked file handles or unclosed databases fail the suite.
 - Pinned tests to know about: the composed-prompt golden test (`test_runner.py::test_composed_prompt_matches_the_pinned_shape_exactly`) pins the section/fencing format, and `test_cli.py` pins each bundled prompt by sha256 (`plans/prompts/synthesise.md`, `plans/prompts/expand_research.md`) — editing one requires updating the matching `PINNED_*_SHA256` in the same commit.
-- CI (`.github/workflows/test.yml`): Python 3.10–3.14 matrix, plus an llm==0.31 floor job and an llm-prerelease job.
+- CI (`.github/workflows/test.yml`): a Python 3.10–3.14 matrix and a lint job, both from `uv sync --locked`; plus an llm==0.31 floor job and an llm-prerelease job, which install unlocked with `uv pip` because the lockfile pins one llm version.
 
 ## Branches and releases
 
+- Before committing or releasing, check for any API keys or tokens included in the code. Refuse to proceed until they are removed.
 - All work lands on `dev` (local-only branch); `origin` carries only `main`. `main` moves **only** by squash-merging `dev` — the branches share no ancestor, so use `--allow-unrelated-histories`; never amend on `main`. Right after a release, `git diff main dev` should be empty.
-- Publishing (PyPI trusted publishing via the `release` GitHub environment, which requires `main` + a `v*` tag): bump the version **on dev** so `pyproject.toml` exactly matches the intended tag, squash-merge to `main`, wait for green, tag, then `gh release create` **non-draft** — `publish.yml` triggers on `release: created`, which never fires when a draft is later published. v0.1.0 is live; PEP 440 treats 0.1 == 0.1.0, so the next version must be 0.1.1 or 0.2.0.
+- Publishing (PyPI trusted publishing via the `release` GitHub environment, which requires `main` + a `v*` tag): bump the version **on dev** with `uv version X.Y.Z` (updates `pyproject.toml` and `uv.lock` together), rebuild and re-check the artifacts, squash-merge to `main`, wait for green, tag `vX.Y.Z`, then `gh release create`. `publish.yml` triggers on `release: published` (a non-draft create or publishing a draft), re-runs the tests, and fails before building if the tag and `pyproject.toml` version differ. PyPI never reuses a filename it has accepted, so a broken release needs a new version number; a workflow that failed before uploading can be re-run at the same version. The first release went up as `0.1` (PEP 440 treats it as 0.1.0).
 - Do not add `Co-Authored-By` trailers to commits in this repo.
 
 ## Deliberate non-features
@@ -79,3 +83,4 @@ These are decisions, not gaps — don't "fix" them unprompted: stage-level `syst
 
 - `build/`, `dist/`, and `*.egg-info/` are stale build artifacts (gitignored). The real source is `llm_plan/`; ignore grep hits under `build/lib/`.
 - The `-q` short flag is deliberately not used for `--quiet` (upstream llm uses `-q` for model queries).
+- llm 0.31 imports `httpx` without declaring it; openai 3 moved to `httpx2`, so any fresh llm 0.31 environment (the CI floor job, a scratch venv) needs `openai<3`.

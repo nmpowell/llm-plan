@@ -15,7 +15,15 @@ from typing import Any
 
 import yaml
 
-from .models import AttachmentRef, FileRef, Plan, PlanError, PromptSpec, PromptType, Stage
+from .models import (
+    AttachmentRef,
+    FileRef,
+    Plan,
+    PlanError,
+    PromptSpec,
+    PromptType,
+    Stage,
+)
 
 # Top-level plan keys that are structure, not variable namespaces.
 RESERVED_KEYS = frozenset({"extends", "name", "summary", "stages", "parallel_config"})
@@ -96,7 +104,9 @@ def _load_yaml_mapping(path: Path) -> dict:
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise PlanError(f"{path} must contain a YAML mapping, not {type(data).__name__}")
+        raise PlanError(
+            f"{path} must contain a YAML mapping, not {type(data).__name__}"
+        )
     return data
 
 
@@ -164,9 +174,9 @@ def parse_prompt_field(
             f"Valid forms: CLI, CLI:instructions, CLI:files, CLI:all"
         )
     if prompt.startswith("inline:"):
-        return (PromptType.INLINE, prompt[len("inline:"):])
+        return (PromptType.INLINE, prompt[len("inline:") :])
     if prompt.startswith("chain:"):
-        target = prompt[len("chain:"):]
+        target = prompt[len("chain:") :]
         if not target:
             raise PlanError(
                 f"Stage '{stage_name}': 'chain:' must name a stage (e.g. 'chain:analyst')"
@@ -225,15 +235,14 @@ def prompt_has_cli(prompt: str | list | None) -> bool:
 def prompt_wants_cli_files(prompt: str | list | None) -> bool:
     """True if any CLI token in the prompt asks for the CLI seed files."""
     return any(
-        text.upper() in ("CLI", "CLI:FILES", "CLI:ALL")
-        for text in prompt_texts(prompt)
+        text.upper() in ("CLI", "CLI:FILES", "CLI:ALL") for text in prompt_texts(prompt)
     )
 
 
 def prompt_chain_targets(prompt: str | list | None) -> list[str]:
     """Stage names referenced by ``chain:`` items in a prompt field."""
     return [
-        text[len("chain:"):]
+        text[len("chain:") :]
         for text in prompt_texts(prompt)
         if text.startswith("chain:")
     ]
@@ -309,9 +318,7 @@ def parse_prompt_list(
     )
 
 
-def _prompt_items(
-    prompt: str | list, stage_name: str
-) -> list[tuple[str, str | None]]:
+def _prompt_items(prompt: str | list, stage_name: str) -> list[tuple[str, str | None]]:
     """Normalise a prompt field (scalar or list) into (text, label) pairs."""
     items: list[tuple[str, str | None]] = []
     for entry in prompt if isinstance(prompt, list) else [prompt]:
@@ -374,11 +381,13 @@ def parse_plan(plan_file: Path) -> Plan:
     if parallel_config is None:
         parallel_config = {}
     if not isinstance(parallel_config, dict):
-        raise PlanError(
-            f"parallel_config must be a mapping, not {parallel_config!r}"
-        )
+        raise PlanError(f"parallel_config must be a mapping, not {parallel_config!r}")
     max_workers = parallel_config.get("max_workers", 1)
-    if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+    if (
+        isinstance(max_workers, bool)
+        or not isinstance(max_workers, int)
+        or max_workers < 1
+    ):
         raise PlanError(
             f"parallel_config.max_workers must be a positive integer, "
             f"not {max_workers!r}"

@@ -22,7 +22,13 @@ import llm
 import pydantic
 
 from . import script_stage
-from .dag import SEED, leaf_stages, resolve_dependencies, topological_order, validate_plan
+from .dag import (
+    SEED,
+    leaf_stages,
+    resolve_dependencies,
+    topological_order,
+    validate_plan,
+)
 from .models import Plan, PlanError, Stage, StageResult
 from .parser import (
     parse_plan,
@@ -99,7 +105,9 @@ class CLIContext:
     """
 
     instructions: str = ""
-    instruction_parts: list = field(default_factory=list)  # ordered [(heading|None, text)]
+    instruction_parts: list = field(
+        default_factory=list
+    )  # ordered [(heading|None, text)]
     fragments: list = field(default_factory=list)
     files: list = field(default_factory=list)  # list[FileRef]
     attachments: list = field(default_factory=list)
@@ -126,7 +134,10 @@ class CLIContext:
     @property
     def has_content(self) -> bool:
         return bool(
-            self.all_instruction_parts or self.fragments or self.files or self.attachments
+            self.all_instruction_parts
+            or self.fragments
+            or self.files
+            or self.attachments
         )
 
 
@@ -185,7 +196,10 @@ class PlanRunner:
         for index, stage in enumerate(stages):
             deps = resolve_dependencies(stage, index, stages)
             wants = self._wants_cli_files(
-                stage, index, deps, prompt_wants_files=prompt_wants_cli_files(stage.prompt)
+                stage,
+                index,
+                deps,
+                prompt_wants_files=prompt_wants_cli_files(stage.prompt),
             )
             if wants:
                 return
@@ -312,7 +326,9 @@ class PlanRunner:
             for process in list(self._active_scripts):
                 _kill_process_group(process)
 
-    def _skip_for_failed_deps(self, stage: Stage, deps: list[str], failed: set[str]) -> bool:
+    def _skip_for_failed_deps(
+        self, stage: Stage, deps: list[str], failed: set[str]
+    ) -> bool:
         failed_deps = [d for d in deps if d in failed]
         if not failed_deps or stage.partial_dependencies or stage.continue_on_failure:
             if failed_deps:
@@ -331,7 +347,9 @@ class PlanRunner:
         failed.add(stage.name)
         return True
 
-    def _finish(self, stage: Stage, result: StageResult, response, failed: set[str]) -> None:
+    def _finish(
+        self, stage: Stage, result: StageResult, response, failed: set[str]
+    ) -> None:
         self.results[stage.name] = result
         if result.success:
             self._text[stage.name] = result.text
@@ -372,7 +390,9 @@ class PlanRunner:
                 error=f"{type(exc).__name__}: {exc}",
             ), None
 
-    def _run_llm_stage(self, stage: Stage, index: int, deps: list[str], failed: set[str]):
+    def _run_llm_stage(
+        self, stage: Stage, index: int, deps: list[str], failed: set[str]
+    ):
         start = time.monotonic()
         try:
             prompt_text, fragments, attachments, model, options = self._prepare_llm(
@@ -449,10 +469,12 @@ class PlanRunner:
         }
         try:
             plan_args = [
-                script_stage.substitute_runtime(str(a), runtime) for a in self.cli.plan_args
+                script_stage.substitute_runtime(str(a), runtime)
+                for a in self.cli.plan_args
             ]
             args = [
-                script_stage.substitute_runtime(str(a), runtime) for a in stage.script_args
+                script_stage.substitute_runtime(str(a), runtime)
+                for a in stage.script_args
             ]
             stage_env = {
                 str(key): script_stage.substitute_runtime(str(value), runtime)
@@ -535,11 +557,7 @@ class PlanRunner:
         if manifest is not None:
             files = script_stage.manifest_output_paths(manifest)
         else:
-            files = [
-                Path(line.strip())
-                for line in stdout.splitlines()
-                if line.strip()
-            ]
+            files = [Path(line.strip()) for line in stdout.splitlines() if line.strip()]
         if not files:
             return failure(
                 "script produced no output paths on stdout "
@@ -636,7 +654,9 @@ class PlanRunner:
             skip_chain_targets=frozenset(failed) if tolerates_failure else frozenset(),
         )
 
-        wants_cli_files = self._wants_cli_files(stage, index, deps, prompt_wants_files=spec.wants_cli_files)
+        wants_cli_files = self._wants_cli_files(
+            stage, index, deps, prompt_wants_files=spec.wants_cli_files
+        )
         if spec.requires_cli_content and not self.cli.has_content:
             raise PlanError(
                 f"Stage '{stage.name}' uses prompt \"CLI\" but no input was provided. "
@@ -650,7 +670,9 @@ class PlanRunner:
         # and stays raw when it is the whole prompt.
         fenced_sections: list[tuple[str, str]] = []
         for ref in stage.resolved_files:
-            fenced_sections.append((ref.label or ref.path.name, _read(ref.path, stage.name)))
+            fenced_sections.append(
+                (ref.label or ref.path.name, _read(ref.path, stage.name))
+            )
         if wants_cli_files:
             for ref in self.cli.files:
                 fenced_sections.append(
@@ -665,14 +687,23 @@ class PlanRunner:
             if dep == SEED or dep in failed or dep in chain_consumed:
                 continue
             dep_stage = by_name.get(dep)
-            label = dep_stage.produces if dep_stage and dep_stage.produces else f"Output from {dep}"
+            label = (
+                dep_stage.produces
+                if dep_stage and dep_stage.produces
+                else f"Output from {dep}"
+            )
             if dep in self._files:
                 files = self._files[dep]
                 for position, path in enumerate(files, 1):
-                    fallback = f"{label} ({position}/{len(files)})" if len(files) > 1 else label
-                    file_label = script_stage.manifest_label(
-                        self._manifests.get(dep), path
-                    ) or fallback
+                    fallback = (
+                        f"{label} ({position}/{len(files)})"
+                        if len(files) > 1
+                        else label
+                    )
+                    file_label = (
+                        script_stage.manifest_label(self._manifests.get(dep), path)
+                        or fallback
+                    )
                     fenced_sections.append((file_label, _read(path, stage.name)))
             elif dep in self._text:
                 fenced_sections.append((label, self._text[dep]))

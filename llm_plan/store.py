@@ -65,7 +65,12 @@ def resolve_plan(value: str) -> Path:
             raise PlanError(f"Plan file not found: {path}")
         return path
 
-    candidates = [f"plan_{value}.yaml", f"{value}.yaml", f"plan_{value}.yml", f"{value}.yml"]
+    candidates = [
+        f"plan_{value}.yaml",
+        f"{value}.yaml",
+        f"plan_{value}.yml",
+        f"{value}.yml",
+    ]
     for directory in search_dirs():
         for candidate in candidates:
             path = directory / candidate

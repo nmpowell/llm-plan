@@ -2,7 +2,7 @@ name: Publish Python Package
 
 on:
   release:
-    types: [created]
+    types: [published]
 
 permissions:
   contents: read
@@ -11,34 +11,34 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - name: Install dependencies
-        run: |
-          pip install -e '.[test]'
-      - name: Run tests
-        run: |
-          python -m pytest
-  deploy:
-    runs-on: ubuntu-latest
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: uv run pytest
+
+  publish:
     needs: [test]
+    runs-on: ubuntu-latest
     environment: release
     permissions:
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.13"
-      - name: Install build tool
+          python-version: "3.14"
+      - name: Check the tag matches the package version
         run: |
-          pip install build
-      - name: Build
-        run: |
-          python -m build
-      - name: Publish
-        uses: pypa/gh-action-pypi-publish@release/v1
+          version="$(uv version --short)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match version $version" >&2
+            exit 1
+          fi
+      - run: uv build --no-sources
+      - run: uvx twine check --strict dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1

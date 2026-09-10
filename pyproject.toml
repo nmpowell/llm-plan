@@ -1,10 +1,11 @@
 [project]
 name = "llm-plan"
-version = "0.2.0"
+version = "0.2.1"
 description = "Run multi-stage LLM workflows: DAGs of prompts and scripts with automatic output chaining"
 readme = "README.md"
 authors = [{name = "Nick Powell"}]
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "llm>=0.31",
@@ -38,7 +39,7 @@ filterwarnings = [
 ]
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -46,3 +47,11 @@ include = ["llm_plan*"]
 
 [tool.setuptools.package-data]
 llm_plan = ["plans/*.yaml", "plans/prompts/*.md", "plans/scripts/*.py"]
+
+[tool.ruff.lint]
+# Ruff's classic default rule set, pinned: ruff 0.16 widened its defaults
+# (import sorting, pyupgrade, RUF rules) and adopting them is a separate job.
+select = ["E4", "E7", "E9", "F"]
+
+[dependency-groups]
+dev = ["llm-plan[test]", "ruff"]

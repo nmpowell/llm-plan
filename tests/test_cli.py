@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import textwrap
@@ -6,13 +7,11 @@ import pytest
 import sqlite_utils
 from click.testing import CliRunner
 from llm.cli import cli
+from conftest import write_plan
 
 not_as_root = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores file permissions"
 )
-
-
-from conftest import write_plan
 
 
 def cli_stage(name="solo", model="echo", **kwargs):
@@ -54,6 +53,33 @@ def logs_db(user_dir):
         yield db
     finally:
         db.close()
+
+
+def logged_responses(logs_db):
+    """(response id, run id, model) per logged response, oldest first.
+
+    Read from whichever table this llm version writes: ``turns`` (llm >= 0.32)
+    or the legacy ``responses`` table (llm 0.31).
+    """
+    for table, run_column in (("turns", "thread_id"), ("responses", "conversation_id")):
+        if table in logs_db.table_names() and logs_db[table].count:
+            return [
+                (row[0], row[1], row[2])
+                for row in logs_db.execute(
+                    f"select id, {run_column}, model from {table} order by rowid"
+                )
+            ]
+    return []
+
+
+def logged_run(logs_db, run_id):
+    """The run's own row: ``threads`` (llm >= 0.32) or legacy ``conversations``."""
+    for table in ("threads", "conversations"):
+        if table in logs_db.table_names():
+            rows = list(logs_db[table].rows_where("id = ?", [run_id]))
+            if rows:
+                return rows[0]
+    raise AssertionError(f"no logged thread or conversation for run {run_id}")
 
 
 class TestPlanPath:
@@ -389,12 +415,14 @@ class TestAttachments:
     def test_bad_attachment_url_fails_before_any_stage_runs(
         self, tmp_path, fake_models, monkeypatch
     ):
-        import httpx
+        import llm.cli
+
+        http = getattr(llm.cli, "httpx2", None) or llm.cli.httpx
 
         def refuse_connection(url, **kwargs):
-            raise httpx.ConnectError("connection refused")
+            raise http.ConnectError("connection refused")
 
-        monkeypatch.setattr("llm.cli.httpx.head", refuse_connection)
+        monkeypatch.setattr(http, "head", refuse_connection)
         plan = write_plan(tmp_path, [cli_stage()])
 
         result = invoke(
@@ -674,25 +702,32 @@ class TestExplain:
 
 
 class TestLogging:
+    # llm's own `logs` command opens its database without closing it. That
+    # ResourceWarning is upstream's, so it is ignored for this test only, and
+    # gc.collect() surfaces it here rather than in whichever test runs next.
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
     def test_responses_are_logged_to_llms_database(self, tmp_path, logs_db):
         plan = write_plan(tmp_path, [cli_stage("a"), cli_stage("b")])
 
         result = invoke("plan", "run", str(plan), "hi")
 
         assert result.exit_code == 0, result.stderr
-        rows = list(logs_db["responses"].rows)
-        assert len(rows) == 2
-        assert {row["model"] for row in rows} == {"echo"}
-        assert rows[0]["response"] == "ECHO[hi]"
+        run_id = result.stderr.split("Run ")[1].split(":")[0]
+        logged = logged_responses(logs_db)
+        assert len(logged) == 2
+        assert {model for _, _, model in logged} == {"echo"}
+        logs = invoke("logs", "--cid", run_id)
+        gc.collect()
+        assert logs.exit_code == 0
+        assert "ECHO[hi]" in logs.output
+        assert "echo" in logs.output
 
     def test_stderr_maps_each_stage_to_its_logged_response_id(self, tmp_path, logs_db):
         plan = write_plan(tmp_path, [cli_stage("a"), cli_stage("b")])
 
         result = invoke("plan", "run", str(plan), "hi")
 
-        id_a, id_b = [
-            row[0] for row in logs_db.execute("select id from responses order by rowid")
-        ]
+        (id_a, _, _), (id_b, _, _) = logged_responses(logs_db)
         assert f"[a] response {id_a}" in result.stderr
         assert f"[b] response {id_b}" in result.stderr
         assert "llm logs --cid" in result.stderr
@@ -715,10 +750,8 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi")
 
         run_id = result.stderr.split("Run ")[1].split(":")[0]
-        conversations = list(logs_db["conversations"].rows)
-        assert [c["id"] for c in conversations] == [run_id]
-        assert conversations[0]["name"] == "test"
-        assert {row["conversation_id"] for row in logs_db["responses"].rows} == {run_id}
+        assert logged_run(logs_db, run_id)["name"] == "test"
+        assert {rid for _, rid, _ in logged_responses(logs_db)} == {run_id}
 
     def test_a_logging_failure_fails_the_run_but_keeps_the_output(
         self, tmp_path, monkeypatch
@@ -753,9 +786,7 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi", "-n")
 
         assert result.exit_code == 0, result.stderr
-        assert (
-            "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
-        )
+        assert logged_responses(logs_db) == []
 
     def test_logs_off_sentinel_is_respected(self, tmp_path, user_dir, logs_db):
         (user_dir / "logs-off").touch()
@@ -764,9 +795,7 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi")
 
         assert result.exit_code == 0, result.stderr
-        assert (
-            "responses" not in logs_db.table_names() or logs_db["responses"].count == 0
-        )
+        assert logged_responses(logs_db) == []
 
     def test_log_and_no_log_together_are_rejected(self, tmp_path, fake_models):
         plan = write_plan(tmp_path, [cli_stage()])
@@ -784,4 +813,4 @@ class TestLogging:
         result = invoke("plan", "run", str(plan), "hi", "--log")
 
         assert result.exit_code == 0, result.stderr
-        assert logs_db["responses"].count == 1
+        assert len(logged_responses(logs_db)) == 1

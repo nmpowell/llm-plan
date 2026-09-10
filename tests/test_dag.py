@@ -10,7 +10,9 @@ from llm_plan.models import Plan, PlanError, Stage
 
 
 def make_stage(name, prompt="CLI", **kwargs):
-    return Stage(name=name, summary=f"{name} stage", model="echo", prompt=prompt, **kwargs)
+    return Stage(
+        name=name, summary=f"{name} stage", model="echo", prompt=prompt, **kwargs
+    )
 
 
 def make_plan(*stages):
@@ -42,7 +44,9 @@ class TestResolveDependencies:
         stages = [
             make_stage("a"),
             make_stage("b", prompt="CLI"),
-            make_stage("c", depends_on=["b"], prompt=[{"prompt": "chain:a", "label": "A"}]),
+            make_stage(
+                "c", depends_on=["b"], prompt=[{"prompt": "chain:a", "label": "A"}]
+            ),
         ]
 
         assert resolve_dependencies(stages[2], 2, stages) == ["b", "a"]
@@ -68,7 +72,9 @@ class TestResolveDependencies:
         stages = [
             make_stage("a"),
             make_stage("b", prompt="CLI"),
-            make_stage("c", depends_on=["b"], prompt=[{"prompt": "chain:a", "label": "A"}]),
+            make_stage(
+                "c", depends_on=["b"], prompt=[{"prompt": "chain:a", "label": "A"}]
+            ),
         ]
 
         assert leaf_stages(stages) == ["c"]
@@ -124,9 +130,7 @@ class TestValidatePlan:
         validate_plan(
             make_plan(
                 make_stage("analyst"),
-                make_stage(
-                    "follow_up", prompt="chain:analyst", depends_on=["analyst"]
-                ),
+                make_stage("follow_up", prompt="chain:analyst", depends_on=["analyst"]),
             )
         )
 
@@ -146,7 +150,10 @@ class TestTopologicalOrder:
         assert topological_order(stages) == ["analyst", "reviewer", "synthesis"]
 
     def test_seed_is_not_part_of_the_order(self):
-        stages = [make_stage("a", depends_on=["seed"]), make_stage("b", depends_on=["a"])]
+        stages = [
+            make_stage("a", depends_on=["seed"]),
+            make_stage("b", depends_on=["a"]),
+        ]
 
         assert topological_order(stages) == ["a", "b"]
 

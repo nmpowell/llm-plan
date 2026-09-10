@@ -148,7 +148,9 @@ class TestHappyPath:
     def test_agent_env_var_applies_when_no_flag_is_given(
         self, script, monkeypatch, env, tmp_path
     ):
-        monkeypatch.setenv("GEMINI_DEEP_RESEARCH_AGENT", "deep-research-pro-preview-12-2025")
+        monkeypatch.setenv(
+            "GEMINI_DEEP_RESEARCH_AGENT", "deep-research-pro-preview-12-2025"
+        )
         api = FakeAPI(polls=[COMPLETED])
 
         rc = run(script, monkeypatch, api, [question_file(tmp_path)])

@@ -1,9 +1,9 @@
 """Log plan responses to llm's logs.db, exactly as ``llm prompt`` does.
 
-llm's logging internals (``logs_db_path``, ``logs_on``, ``migrate``,
-``Response.log_to_db``) are not yet part of its stable public API; this
-module keeps every use of *those* in one place so an upstream change to
-logging lands here. Other modules use other llm.cli internals for their
+``Response.log_to_db`` is a documented API since llm 0.32, but the rest of
+llm's logging (``logs_db_path``, ``logs_on``, ``migrate``, the table layout)
+is internal; this module keeps every use of *those* in one place so an
+upstream change to logging lands here. Other modules use other llm.cli internals for their
 own concerns (fragment and attachment resolution, model options).
 """
 
@@ -58,7 +58,19 @@ def log_response(db: sqlite_utils.Database, response, conversation) -> None:
     if not any(existing is response for existing in conversation.responses):
         conversation.responses.append(response)
     response.log_to_db(db)
-    # log_to_db derives the row's name from the first prompt and ignores
-    # Conversation.name (llm 0.31 and 0.32) - set the plan's name explicitly.
     if conversation.name:
-        db["conversations"].update(conversation.id, {"name": conversation.name})
+        _name_run(db, conversation.id, conversation.name)
+
+
+def _name_run(db: sqlite_utils.Database, run_id: str, name: str) -> None:
+    """Set the run's name on the row ``log_to_db`` created for it.
+
+    ``log_to_db`` derives the name from the first prompt and ignores
+    ``Conversation.name``. llm >= 0.32 records the run as a ``threads`` row;
+    llm 0.31 as a row in the legacy ``conversations`` table.
+    """
+    for table in ("threads", "conversations"):
+        if table in db.table_names() and db[table].count_where("id = ?", [run_id]):
+            db[table].update(run_id, {"name": name})
+            return
+    raise RuntimeError(f"no thread or conversation row was logged for run {run_id}")

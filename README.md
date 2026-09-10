@@ -26,6 +26,9 @@ Install this plugin in the same environment as LLM:
 llm install llm-plan
 ```
 
+llm 0.31 and later are supported. If you stay on llm 0.31, keep `openai<3`
+installed: llm 0.31 imports `httpx`, which openai 3 no longer provides.
+
 ## Quick start
 
 Run the bundled `synthesis` plan: four models analyse your question in
@@ -40,8 +43,9 @@ run afterwards with `llm logs`.
 
 (The bundled plan uses Anthropic, Gemini and OpenAI models, so it expects the
 `llm-anthropic` and `llm-gemini` plugins plus the relevant keys. Preview any
-plan without spending anything using `--explain`, or dry-run the whole DAG on
-a cheap model with `-m`.)
+plan without spending anything using `--explain`. `-m` runs the plan for real
+on one model: it overrides every LLM stage, it is billed, and script stages
+still execute.)
 
 The other bundled plan, `deep_research`, expands your question into a
 comprehensive research brief, then runs Google's
@@ -53,8 +57,10 @@ needs no extra Python dependencies:
 llm plan deep_research "How do heat pump COPs hold up below -20°C?"
 ```
 
-It needs a Gemini API key — `$GEMINI_API_KEY`, `$LLM_GEMINI_KEY`, or the key
-stored by `llm keys set gemini`. A Deep Research task runs
+It needs a Gemini API key that both stages can see: run `llm keys set gemini`
+or set `$LLM_GEMINI_KEY`, which is what the `llm-gemini` plugin reads for the
+expanding stage. The research script also accepts `$GEMINI_API_KEY`, but that
+alone does not satisfy the first stage. A Deep Research task runs
 for minutes up to an hour and may be expensive. Copy the plan into
 `llm plan path` and edit its `settings:` to switch tier.
 The report prints to stdout when done; the
@@ -96,7 +102,7 @@ Options for `run`:
 - `-a/--attachment PATH_OR_URL` — seed attachments (images etc.); accepts `-`
   for stdin and validates paths and URLs up front, exactly like `llm prompt -a`.
 - `-m/--model MODEL` — override the model for **every** LLM stage (handy for
-  a cheap end-to-end check: `-m haiku-4.5`). Honours `$LLM_MODEL`.
+  a cheap end-to-end check: `-m claude-haiku-4.5`). Honours `$LLM_MODEL`.
 - `-o/--option KEY VALUE` — model option applied to every LLM stage. Merge
   order per stage: `llm models options` defaults < the stage's `options:` <
   `-o`.
@@ -132,7 +138,7 @@ stages:
 
   - name: "skeptic"
     summary: "Hunt for weaknesses"
-    model: "gpt-5.6"
+    model: "gpt-5.5"
     prompt:
       - "CLI"
       - "inline:Act as a sceptical reviewer. List the strongest objections."
@@ -199,10 +205,11 @@ stage `files:` first, then dependency outputs (headed by their `produces`),
 then prompt files (default heading `MAIN INSTRUCTIONS`), then
 inline/chain/CLI parts in listed order.
 
-Plans are validated fully before anything runs — missing prompt files,
-unknown stage keys (with a did-you-mean), malformed `depends_on`, undefined
-`${variables}` and forward `chain:` references all fail at load, before any
-stage spends money.
+A plan's structure is validated fully before anything runs — missing prompt
+files, unknown stage keys (with a did-you-mean), malformed `depends_on`,
+undefined `${variables}` and forward `chain:` references all fail at load,
+before any stage spends money. Model names and model options are resolved
+when each stage runs, so a bad model in a later stage fails at that stage.
 
 ### Script stages
 
@@ -248,8 +255,9 @@ with `_` are hidden from `llm plan list`.
 
 ## Logging and prior runs
 
-Every stage's prompt and response is logged to LLM's `logs.db` under the same
-rules as `llm prompt` (`-n/--no-log`, `--log`, the `llm logs off` sentinel),
+Each LLM stage's prompt and response is logged to LLM's `logs.db` once the
+stage succeeds (script outputs and failed attempts are not logged), under the
+same rules as `llm prompt` (`-n/--no-log`, `--log`, the `llm logs off` sentinel),
 and a run's responses share one conversation whose id is the run id printed
 on stderr — so one command retrieves the whole run. A failure to log fails
 the command: the log is a promise, not best-effort.
@@ -266,21 +274,18 @@ per-run root (its path is printed on stderr and kept after the run).
 ## Development
 
 ```bash
+git clone https://github.com/nmpowell/llm-plan
 cd llm-plan
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[test]'
-python -m pytest
+uv sync --locked
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
 ```
 
-Or with [uv](https://docs.astral.sh/uv/):
+Without [uv](https://docs.astral.sh/uv/): `pip install -e '.[test]'`, then
+`python -m pytest`.
 
-```bash
-cd llm-plan
-uv venv && source .venv/bin/activate
-uv pip install -e '.[test]'
-python -m pytest
-```
-
-The test suite uses fake in-process models — no network calls, no API keys.
-Tested against llm 0.31 and 0.32, on macOS and Linux (script-stage process
-management is POSIX-only; Windows is untested and unsupported).
+The test suite uses fake in-process models: no network calls, no API keys.
+CI runs it on Linux: Python 3.10 to 3.14 against the locked llm release, 3.10
+against llm 0.31 (the minimum) and 3.14 against the latest llm pre-release.
+Development happens on macOS. Script-stage process management is POSIX-only;
+Windows is untested and unsupported.

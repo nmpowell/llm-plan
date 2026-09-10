@@ -46,12 +46,19 @@ def write_script(tmp_path, body, name="script.py"):
 
 def script_stage(tmp_path, body, name="worker", script_name="script.py", **kwargs):
     write_script(tmp_path, body, script_name)
-    return {"name": name, "summary": f"{name} stage", "type": "python_script",
-            "script": script_name, **kwargs}
+    return {
+        "name": name,
+        "summary": f"{name} stage",
+        "type": "python_script",
+        "script": script_name,
+        **kwargs,
+    }
 
 
 class TestScriptExecution:
-    def test_manifest_outputs_are_recorded_with_first_file_as_text(self, tmp_path, run_plan):
+    def test_manifest_outputs_are_recorded_with_first_file_as_text(
+        self, tmp_path, run_plan
+    ):
         runner, results = run_plan([script_stage(tmp_path, WRITER_SCRIPT)])
 
         result = results["worker"]
@@ -80,7 +87,9 @@ class TestScriptExecution:
         assert "file.md" in results["worker"].error
 
     def test_no_output_fails_the_stage(self, tmp_path, run_plan):
-        runner, results = run_plan([script_stage(tmp_path, 'print()')], expect_error=True)
+        runner, results = run_plan(
+            [script_stage(tmp_path, "print()")], expect_error=True
+        )
 
         assert not results["worker"].success
         assert "no output" in results["worker"].error.lower()
@@ -106,7 +115,9 @@ class TestScriptExecution:
         assert not results["worker"].success
         assert "timeout" in results["worker"].error.lower()
 
-    def test_timeout_kills_the_scripts_whole_process_group_promptly(self, tmp_path, run_plan):
+    def test_timeout_kills_the_scripts_whole_process_group_promptly(
+        self, tmp_path, run_plan
+    ):
         # The grandchild inherits the stdout pipe: unless the whole group is
         # killed it outlives the stage and can block the runner's pipe reads.
         body = """
@@ -172,12 +183,17 @@ class TestScriptExecution:
         assert results["worker"].success, results["worker"].error
         assert results["worker"].text == "accented filename body"
 
-    @pytest.mark.parametrize("stdout_line", [
-        '{"outputs": null}',
-        '{"outputs": {"path": "x"}}',
-        '{"outputs": [123]}',
-    ])
-    def test_malformed_manifests_fail_the_stage_cleanly(self, tmp_path, stdout_line, run_plan):
+    @pytest.mark.parametrize(
+        "stdout_line",
+        [
+            '{"outputs": null}',
+            '{"outputs": {"path": "x"}}',
+            '{"outputs": [123]}',
+        ],
+    )
+    def test_malformed_manifests_fail_the_stage_cleanly(
+        self, tmp_path, stdout_line, run_plan
+    ):
         body = f"print('{stdout_line}')"
 
         runner, results = run_plan([script_stage(tmp_path, body)], expect_error=True)
@@ -337,12 +353,24 @@ class TestScriptScratchIsolation:
         fifo = tmp_path / "rendezvous"
         os.mkfifo(fifo)
         stages = [
-            script_stage(tmp_path, RENDEZVOUS_WRITER, name="left",
-                         script_name="left.py", timeout=5,
-                         depends_on=["seed"], script_args=[str(fifo), "w"]),
-            script_stage(tmp_path, RENDEZVOUS_WRITER, name="right",
-                         script_name="right.py", timeout=5,
-                         depends_on=["seed"], script_args=[str(fifo), "r"]),
+            script_stage(
+                tmp_path,
+                RENDEZVOUS_WRITER,
+                name="left",
+                script_name="left.py",
+                timeout=5,
+                depends_on=["seed"],
+                script_args=[str(fifo), "w"],
+            ),
+            script_stage(
+                tmp_path,
+                RENDEZVOUS_WRITER,
+                name="right",
+                script_name="right.py",
+                timeout=5,
+                depends_on=["seed"],
+                script_args=[str(fifo), "r"],
+            ),
         ]
 
         runner, results = run_plan(stages, max_workers=4)
@@ -359,10 +387,20 @@ class TestScriptScratchIsolation:
     ):
         stages = [
             {"name": "thinker", "summary": "s", "model": "echo", "prompt": "CLI"},
-            script_stage(tmp_path, RECORDER_SCRIPT, name="left",
-                         script_name="left.py", depends_on=["thinker"]),
-            script_stage(tmp_path, RECORDER_SCRIPT, name="right",
-                         script_name="right.py", depends_on=["thinker"]),
+            script_stage(
+                tmp_path,
+                RECORDER_SCRIPT,
+                name="left",
+                script_name="left.py",
+                depends_on=["thinker"],
+            ),
+            script_stage(
+                tmp_path,
+                RECORDER_SCRIPT,
+                name="right",
+                script_name="right.py",
+                depends_on=["thinker"],
+            ),
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="hi"))
@@ -392,7 +430,9 @@ class TestScriptInputs:
         assert record["run_id"] == runner.run_id
         assert record["custom"] == "custom-value"
 
-    def test_runtime_tokens_in_env_values_reach_the_script_substituted(self, tmp_path, run_plan):
+    def test_runtime_tokens_in_env_values_reach_the_script_substituted(
+        self, tmp_path, run_plan
+    ):
         stage = script_stage(
             tmp_path,
             RECORDER_SCRIPT,
@@ -407,8 +447,9 @@ class TestScriptInputs:
     def test_llm_dependency_text_arrives_as_a_file_argument(self, tmp_path, run_plan):
         stages = [
             {"name": "thinker", "summary": "s", "model": "echo", "prompt": "CLI"},
-            script_stage(tmp_path, RECORDER_SCRIPT, name="worker",
-                         depends_on=["thinker"]),
+            script_stage(
+                tmp_path, RECORDER_SCRIPT, name="worker", depends_on=["thinker"]
+            ),
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="hi"))
@@ -419,10 +460,16 @@ class TestScriptInputs:
 
     def test_script_files_flow_to_dependent_scripts(self, tmp_path, run_plan):
         stages = [
-            script_stage(tmp_path, WRITER_SCRIPT, name="producer",
-                         script_name="producer.py"),
-            script_stage(tmp_path, RECORDER_SCRIPT, name="consumer",
-                         script_name="consumer.py", depends_on=["producer"]),
+            script_stage(
+                tmp_path, WRITER_SCRIPT, name="producer", script_name="producer.py"
+            ),
+            script_stage(
+                tmp_path,
+                RECORDER_SCRIPT,
+                name="consumer",
+                script_name="consumer.py",
+                depends_on=["producer"],
+            ),
         ]
 
         runner, results = run_plan(stages)
@@ -434,9 +481,13 @@ class TestScriptInputs:
         (tmp_path / "reference.md").write_text("reference body", encoding="utf-8")
         stages = [
             {"name": "thinker", "summary": "s", "model": "echo", "prompt": "CLI"},
-            script_stage(tmp_path, RECORDER_SCRIPT, name="worker",
-                         depends_on=["thinker"],
-                         files=[{"path": "reference.md", "label": "Reference"}]),
+            script_stage(
+                tmp_path,
+                RECORDER_SCRIPT,
+                name="worker",
+                depends_on=["thinker"],
+                files=[{"path": "reference.md", "label": "Reference"}],
+            ),
         ]
 
         runner, results = run_plan(stages, CLIContext(instructions="hi"))
@@ -456,15 +507,18 @@ class TestScriptInputs:
         assert record["argv"] == [str(seed)]
         assert record["inputs"] == ["seed body"]
 
-    @pytest.mark.parametrize("prompt, receives", [
-        ("CLI", True),
-        ("CLI:all", True),
-        ("CLI:files", True),
-        ("CLI:instructions", False),
-    ])
+    @pytest.mark.parametrize(
+        "prompt, receives",
+        [
+            ("CLI", True),
+            ("CLI:all", True),
+            ("CLI:files", True),
+            ("CLI:instructions", False),
+        ],
+    )
     def test_script_cli_prompt_forms_control_seed_file_routing(
-        self, tmp_path, prompt, receives
-    , run_plan):
+        self, tmp_path, prompt, receives, run_plan
+    ):
         stage = script_stage(tmp_path, RECORDER_SCRIPT, prompt=prompt)
         cli = CLIContext(instructions="hi", fragments=["seed fragment text"])
 
@@ -473,11 +527,12 @@ class TestScriptInputs:
         record = json.loads(results["worker"].text)
         assert (record["inputs"] == ["seed fragment text"]) is receives
 
-    def test_seed_dependent_script_gets_pathless_fragments_materialised(self, tmp_path, run_plan):
+    def test_seed_dependent_script_gets_pathless_fragments_materialised(
+        self, tmp_path, run_plan
+    ):
         stages = [
             {"name": "first", "summary": "s", "model": "echo", "prompt": "CLI"},
-            script_stage(tmp_path, RECORDER_SCRIPT, name="worker",
-                         depends_on=["seed"]),
+            script_stage(tmp_path, RECORDER_SCRIPT, name="worker", depends_on=["seed"]),
         ]
         cli = CLIContext(instructions="hi", fragments=["fragment text with no path"])
 
@@ -495,7 +550,9 @@ class TestScriptInputs:
         record = json.loads(results["worker"].text)
         assert record["instructions"] == "## Focus Areas\n\nheaded body"
 
-    def test_unknown_runtime_variable_in_plan_args_fails_the_stage(self, tmp_path, run_plan):
+    def test_unknown_runtime_variable_in_plan_args_fails_the_stage(
+        self, tmp_path, run_plan
+    ):
         stage = script_stage(tmp_path, RECORDER_SCRIPT)
         cli = CLIContext(plan_args=["${cli.bogus}"])
 
@@ -506,26 +563,37 @@ class TestScriptInputs:
 
 
 class TestScriptChainingIntoLlm:
-    def test_llm_stage_receives_labelled_sections_per_produced_file(self, tmp_path, run_plan):
+    def test_llm_stage_receives_labelled_sections_per_produced_file(
+        self, tmp_path, run_plan
+    ):
         stages = [
             script_stage(tmp_path, WRITER_SCRIPT, name="fetch", produces="Fetched"),
-            {"name": "review", "summary": "s", "model": "echo",
-             "depends_on": ["fetch"], "prompt": "inline:Review the data."},
+            {
+                "name": "review",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["fetch"],
+                "prompt": "inline:Review the data.",
+            },
         ]
 
         runner, results = run_plan(stages)
 
         text = results["review"].text
-        assert "## Fetched Data" in text        # manifest label wins
-        assert "## Fetched (2/2)" in text       # fallback label with index
+        assert "## Fetched Data" in text  # manifest label wins
+        assert "## Fetched (2/2)" in text  # fallback label with index
         assert "first file body" in text and "second file body" in text
 
     def test_chain_prompt_from_a_script_uses_its_first_file(self, tmp_path, run_plan):
         stages = [
             script_stage(tmp_path, WRITER_SCRIPT, name="fetch"),
-            {"name": "review", "summary": "s", "model": "echo",
-             "depends_on": ["fetch"],
-             "prompt": [{"prompt": "chain:fetch", "label": "Data"}]},
+            {
+                "name": "review",
+                "summary": "s",
+                "model": "echo",
+                "depends_on": ["fetch"],
+                "prompt": [{"prompt": "chain:fetch", "label": "Data"}],
+            },
         ]
 
         runner, results = run_plan(stages)

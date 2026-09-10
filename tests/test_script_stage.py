@@ -1,6 +1,11 @@
 import io
 
-from llm_plan.script_stage import emit_outputs, manifest_label, manifest_output_paths, parse_manifest
+from llm_plan.script_stage import (
+    emit_outputs,
+    manifest_label,
+    manifest_output_paths,
+    parse_manifest,
+)
 
 
 class TestManifestRoundTrip:
@@ -33,7 +38,12 @@ class TestManifestRoundTrip:
     def test_bare_lines_mode_emits_paths_only(self, tmp_path):
         stream = io.StringIO()
 
-        emit_outputs([tmp_path / "a.md", tmp_path / "b.md"], manifest=False, stream=stream)
+        emit_outputs(
+            [tmp_path / "a.md", tmp_path / "b.md"], manifest=False, stream=stream
+        )
 
-        assert stream.getvalue().splitlines() == [str(tmp_path / "a.md"), str(tmp_path / "b.md")]
+        assert stream.getvalue().splitlines() == [
+            str(tmp_path / "a.md"),
+            str(tmp_path / "b.md"),
+        ]
         assert parse_manifest(stream.getvalue()) is None

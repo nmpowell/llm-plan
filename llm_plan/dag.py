@@ -50,7 +50,9 @@ def validate_plan(plan: Plan) -> None:
     for stage in stages:
         for dep in stage.depends_on:
             if dep not in known:
-                raise PlanError(f"Stage '{stage.name}' depends on unknown stage '{dep}'")
+                raise PlanError(
+                    f"Stage '{stage.name}' depends on unknown stage '{dep}'"
+                )
         for target in prompt_chain_targets(stage.prompt):
             if target not in names:
                 raise PlanError(

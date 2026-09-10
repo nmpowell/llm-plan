@@ -172,9 +172,7 @@ def poll_until_complete(interaction_id, api_key, max_wait_minutes):
             )
 
         try:
-            interaction = _request(
-                "GET", f"{API_BASE}/{interaction_id}", api_key
-            )
+            interaction = _request("GET", f"{API_BASE}/{interaction_id}", api_key)
         except Exception as exc:
             if not _is_transient_poll_error(exc):
                 raise ResearchError(
@@ -225,7 +223,9 @@ def read_question(files):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--agent", help=f"Deep Research agent (default {DEFAULT_AGENT})")
+    parser.add_argument(
+        "--agent", help=f"Deep Research agent (default {DEFAULT_AGENT})"
+    )
     parser.add_argument(
         "--max-wait",
         type=float,
@@ -233,7 +233,9 @@ def main(argv=None):
         metavar="MINUTES",
         help="give up polling after this many minutes",
     )
-    parser.add_argument("files", nargs="*", help="dependency output paths (from llm-plan)")
+    parser.add_argument(
+        "files", nargs="*", help="dependency output paths (from llm-plan)"
+    )
     args = parser.parse_args(argv)
 
     api_key = resolve_api_key()
@@ -275,14 +277,20 @@ def main(argv=None):
 
     report = report_text(final)
     if not report.strip():
-        log(f"Completed interaction contained no report text. Interaction ID: {interaction_id}")
+        log(
+            f"Completed interaction contained no report text. Interaction ID: {interaction_id}"
+        )
         return 1
 
     report_path = out_dir / "report.md"
     report_path.write_text(report, encoding="utf-8")
     print(
         json.dumps(
-            {"outputs": [{"path": str(report_path), "label": "Gemini Deep Research Report"}]}
+            {
+                "outputs": [
+                    {"path": str(report_path), "label": "Gemini Deep Research Report"}
+                ]
+            }
         )
     )
     return 0

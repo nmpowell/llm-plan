@@ -171,7 +171,7 @@ def run_(
     \b
     Examples:
       llm plan run synthesis "Review this design" -f notes.md
-      cat notes.md | llm plan run ./my_plan.yaml -m claude-4.5-haiku
+      cat notes.md | llm plan run ./my_plan.yaml -m claude-haiku-4.5
     """
     try:
         loaded = load_plan(resolve_plan(plan_ref))
