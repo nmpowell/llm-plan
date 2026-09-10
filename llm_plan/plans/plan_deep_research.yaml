@@ -28,7 +28,7 @@ settings:
 stages:
   - name: "expand_prompt"
     summary: "Expand the raw question into a full Deep Research brief"
-    model: "${models.gemini_pro}"
+    model: "${models.gemini_high}"
     prompt:
       - prompt: "${prompts.expand_research}"
         label: "Deep Research Prompt Architect Instructions"

@@ -21,6 +21,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
       - run: uv run pytest
+  package:
+    uses: ./.github/workflows/package.yml
   lint:
     runs-on: ubuntu-latest
     steps:

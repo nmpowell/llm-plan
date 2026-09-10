@@ -1,11 +1,13 @@
-# Multi-model synthesis: several models analyse the same input in parallel,
-# then one model reconciles their answers into a single response.
+# Multi-model synthesis: six models analyse the same input in parallel, then
+# one model reconciles their answers into a single response.
 #
 #   llm plan synthesis "Your question" -f context.md
 #
-# Each analyst receives the CLI instructions (and any -f fragments); the
-# synthesis stage receives only the original question plus every analysis,
-# and still runs if some analysts fail (partial_dependencies).
+# The analysts cover each provider's high and medium tier; Gemini has no
+# medium tier, so its low tier stands in. Each analyst receives the CLI
+# instructions (and any -f fragments); the synthesis stage receives only the
+# original question plus every analysis, and still runs if some analysts fail
+# (partial_dependencies).
 #
 # The bundled synthesis prompt (prompts/synthesise.md) is a compact
 # general-purpose one. To customise it or the stages, copy this plan and
@@ -20,42 +22,57 @@ parallel_config:
   max_workers: 7
 
 stages:
-  - name: "opus"
-    summary: "Claude Opus analysis"
-    model: "${models.opus}"
+  - name: "claude_high"
+    summary: "Claude high-tier analysis"
+    model: "${models.claude_high}"
     prompt: "CLI"
     prompt_label: "Instructions"
-    produces: "Opus Analysis"
+    produces: "Claude High Analysis"
 
-  - name: "sonnet"
-    summary: "Claude Sonnet analysis"
-    model: "${models.sonnet}"
+  - name: "claude_medium"
+    summary: "Claude medium-tier analysis"
+    model: "${models.claude_medium}"
     prompt: "CLI"
     prompt_label: "Instructions"
-    produces: "Sonnet Analysis"
+    produces: "Claude Medium Analysis"
 
-  - name: "gemini_pro"
-    summary: "Gemini Pro analysis"
-    model: "${models.gemini_pro}"
+  - name: "openai_high"
+    summary: "OpenAI high-tier analysis"
+    model: "${models.openai_high}"
     prompt: "CLI"
     prompt_label: "Instructions"
-    produces: "Gemini Pro Analysis"
+    produces: "OpenAI High Analysis"
 
-  - name: "gpt5"
-    summary: "GPT-5 analysis"
-    model: "${models.gpt5}"
+  - name: "openai_medium"
+    summary: "OpenAI medium-tier analysis"
+    model: "${models.openai_medium}"
     prompt: "CLI"
     prompt_label: "Instructions"
-    produces: "GPT-5 Analysis"
+    produces: "OpenAI Medium Analysis"
+
+  - name: "gemini_high"
+    summary: "Gemini high-tier analysis"
+    model: "${models.gemini_high}"
+    prompt: "CLI"
+    prompt_label: "Instructions"
+    produces: "Gemini High Analysis"
+
+  - name: "gemini_low"
+    summary: "Gemini low-tier analysis (stands in for the missing medium tier)"
+    model: "${models.gemini_low}"
+    prompt: "CLI"
+    prompt_label: "Instructions"
+    produces: "Gemini Low Analysis"
 
   - name: "synthesis"
     summary: "Synthesise all analyses"
-    model: "${models.opus}"
+    model: "${models.claude_high}"
     prompt:
       - prompt: "CLI:instructions"
         label: "Original Question"
       - prompt: "${prompts.synthesise}"
         label: "Synthesis Instructions"
-    depends_on: [opus, sonnet, gemini_pro, gpt5]
+    depends_on:
+      [claude_high, claude_medium, openai_high, openai_medium, gemini_high, gemini_low]
     partial_dependencies: true
     produces: "Final Synthesis"

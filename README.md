@@ -29,10 +29,21 @@ llm install llm-plan
 llm 0.31 and later are supported. If you stay on llm 0.31, keep `openai<3`
 installed: llm 0.31 imports `httpx`, which openai 3 no longer provides.
 
+Check it worked — this costs nothing and calls no model:
+
+```bash
+llm plan list
+```
+```
+deep_research  Expand a research question, then run Gemini Deep Research
+synthesis      Multi-model analysis in parallel, reconciled by a final synthesis
+```
+
 ## Quick start
 
-Run the bundled `synthesis` plan: four models analyse your question in
-parallel, then a fifth reconciles their answers into a single response:
+Run the bundled `synthesis` plan: six models analyse your question in
+parallel — each provider's high and medium tier — then the high-tier Claude
+model reconciles their answers into a single response:
 
 ```bash
 llm plan synthesis "What are the trade-offs of a monorepo?" -f input-notes.md

@@ -1,6 +1,6 @@
 [project]
 name = "llm-plan"
-version = "0.2.1"
+version = "0.3.0"
 description = "Run multi-stage LLM workflows: DAGs of prompts and scripts with automatic output chaining"
 readme = "README.md"
 authors = [{name = "Nick Powell"}]

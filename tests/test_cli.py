@@ -449,6 +449,54 @@ class TestAttachments:
 
 
 class TestBundledPlans:
+    def test_the_bundled_defaults_ship_a_complete_tier_table(self):
+        # _defaults.yaml is shipped for users to extend, so every tier is
+        # public surface even where no bundled plan uses it — claude_low and
+        # openai_low are reached only by user plans, and a typo in either
+        # would surface as an unknown-model error on someone else's machine.
+        # Anthropic and OpenAI each expose low/medium/high; Gemini
+        # deliberately has no medium tier, so plans use gemini_low where they
+        # want a cheaper Gemini. Same reasoning as the pinned prompts below:
+        # changing what a shipped name resolves to must be deliberate.
+        from llm_plan.parser import load_with_extends
+        from llm_plan.store import BUNDLED_PLAN_DIR
+
+        defaults = load_with_extends(BUNDLED_PLAN_DIR / "_defaults.yaml")
+
+        assert defaults["models"] == {
+            "claude_low": "anthropic/claude-sonnet-5",
+            "claude_medium": "anthropic/claude-opus-5",
+            "claude_high": "anthropic/claude-fable-5-1",
+            "gemini_low": "gemini/gemini-3.8-flash",
+            "gemini_high": "gemini/gemini-3.1-pro-preview",
+            "openai_low": "gpt-5.6-luna",
+            "openai_medium": "gpt-5.6-sol",
+            "openai_high": "gpt-6-astra",
+        }
+
+    def test_synthesis_analysts_resolve_to_the_intended_models(self):
+        # The stage names say which tier they are; nothing else checks that
+        # the tier actually resolves to the model it claims. Swapping two
+        # entries in _defaults.yaml would otherwise leave every test green
+        # while the plan quietly ran the wrong models. The expected IDs are
+        # written out by hand rather than read back from _defaults.yaml,
+        # which would only assert that the file equals itself.
+        from llm_plan.runner import load_plan
+        from llm_plan.store import resolve_plan
+
+        plan = load_plan(resolve_plan("synthesis"))
+
+        models = {stage.name: stage.model for stage in plan.stages}
+        assert models == {
+            "claude_high": "anthropic/claude-fable-5-1",
+            "claude_medium": "anthropic/claude-opus-5",
+            "openai_high": "gpt-6-astra",
+            "openai_medium": "gpt-5.6-sol",
+            "gemini_high": "gemini/gemini-3.1-pro-preview",
+            "gemini_low": "gemini/gemini-3.8-flash",
+            "synthesis": "anthropic/claude-fable-5-1",
+        }
+
     def test_synthesis_has_the_expected_stage_structure(self):
         from llm_plan.runner import load_plan
         from llm_plan.store import resolve_plan
@@ -457,22 +505,33 @@ class TestBundledPlans:
 
         stages = {stage.name: stage for stage in plan.stages}
         assert [s.name for s in plan.stages] == [
-            "opus",
-            "sonnet",
-            "gemini_pro",
-            "gpt5",
+            "claude_high",
+            "claude_medium",
+            "openai_high",
+            "openai_medium",
+            "gemini_high",
+            "gemini_low",
             "synthesis",
         ]
-        assert stages["gemini_pro"].produces == "Gemini Pro Analysis"
+        assert stages["gemini_high"].produces == "Gemini High Analysis"
         assert all(
             stages[name].prompt_label == "Instructions"
-            for name in ("opus", "sonnet", "gemini_pro", "gpt5")
+            for name in (
+                "claude_high",
+                "claude_medium",
+                "openai_high",
+                "openai_medium",
+                "gemini_high",
+                "gemini_low",
+            )
         )
         assert stages["synthesis"].depends_on == [
-            "opus",
-            "sonnet",
-            "gemini_pro",
-            "gpt5",
+            "claude_high",
+            "claude_medium",
+            "openai_high",
+            "openai_medium",
+            "gemini_high",
+            "gemini_low",
         ]
         assert stages["synthesis"].partial_dependencies is True
         assert stages["synthesis"].produces == "Final Synthesis"
@@ -494,8 +553,15 @@ class TestBundledPlans:
 
         assert result.exit_code == 0, result.stderr
         assert result.stdout.startswith("ECHO[")
-        assert "## Opus Analysis" in result.stdout
-        assert "## GPT-5 Analysis" in result.stdout
+        # The echo model returns its composed prompt, so every analyst's
+        # section heading appearing here proves each analysis actually
+        # reached the synthesis rather than being run and discarded.
+        assert "## Claude High Analysis" in result.stdout
+        assert "## Claude Medium Analysis" in result.stdout
+        assert "## OpenAI High Analysis" in result.stdout
+        assert "## OpenAI Medium Analysis" in result.stdout
+        assert "## Gemini High Analysis" in result.stdout
+        assert "## Gemini Low Analysis" in result.stdout
         assert "Synthesis Instructions" in result.stdout
         assert "the question" in result.stdout
 
@@ -529,6 +595,21 @@ class TestBundledPlans:
         assert "--max-wait" in research.script_args
         max_wait = research.script_args[research.script_args.index("--max-wait") + 1]
         assert float(max_wait) * 60 < research.timeout
+
+    def test_deep_research_expands_with_the_high_tier_gemini_model(self):
+        # The brief this stage writes decides what the (slow, expensive)
+        # research stage then goes and does, so a silent downgrade to the
+        # cheap tier would be costly and invisible. Pointing the stage at a
+        # tier that does not exist already fails at load; pointing it at the
+        # wrong existing tier is what this catches.
+        from llm_plan.runner import load_plan
+        from llm_plan.store import resolve_plan
+
+        plan = load_plan(resolve_plan("deep_research"))
+
+        expand = plan.stages[0]
+        assert expand.name == "expand_prompt"
+        assert expand.model == "gemini/gemini-3.1-pro-preview"
 
     def test_the_bundled_expand_research_prompt_is_pinned(self):
         # Same rule as the synthesis prompt: editing the bundled prompt
