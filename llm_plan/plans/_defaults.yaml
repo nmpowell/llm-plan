@@ -1,22 +1,34 @@
 # Shared definitions for the bundled plans.
 #
 # Plans extend this file (`extends: "_defaults.yaml"`) and reference values
-# as ${models.opus}, ${prompts.synthesise}, etc.
+# as ${models.claude_high}, ${prompts.synthesise}, etc.
+#
+# The models are named by capability tier — <provider>_low, _medium and
+# _high — rather than by version, so moving a plan to a newer model is a
+# one-line edit here. Gemini deliberately has no medium tier, so plans use
+# gemini_low wherever they want a cheaper Gemini.
 #
 # Model values are passed straight to llm's model resolution, so they may be
 # model IDs, plugin aliases, or aliases you set with `llm aliases set`.
-# The defaults below need the llm-anthropic and llm-gemini plugins installed
-# (gpt-5.5 ships with llm's OpenAI support); override any of them by copying
-# this file and the plan into your own plans directory (`llm plan path`).
+# The defaults below need reasonably recent llm-anthropic and llm-gemini
+# plugins installed, plus llm's own OpenAI support; override any of them by
+# copying this file and the plan into your own plans directory
+# (`llm plan path`).
 
 models:
-  opus: "anthropic/claude-opus-4-8"
-  sonnet: "anthropic/claude-sonnet-4-6"
-  haiku: "anthropic/claude-haiku-4-5-20251001"
-  gemini: "gemini/gemini-3.1-pro-preview"
-  gemini_pro: "gemini/gemini-3.1-pro-preview"
-  gemini_flash: "gemini/gemini-3.5-flash"
-  gpt5: "gpt-5.5-2026-04-23"
+  # Anthropic
+  claude_low: "anthropic/claude-sonnet-5"
+  claude_medium: "anthropic/claude-opus-5"
+  claude_high: "anthropic/claude-fable-5-1"
+
+  # Google — no medium tier; plans use gemini_low where they want a cheaper one
+  gemini_low: "gemini/gemini-3.8-flash"
+  gemini_high: "gemini/gemini-3.1-pro-preview"
+
+  # OpenAI
+  openai_low: "gpt-5.6-luna"
+  openai_medium: "gpt-5.6-sol"
+  openai_high: "gpt-6-astra"
 
 prompts:
   synthesise: "prompts/synthesise.md"

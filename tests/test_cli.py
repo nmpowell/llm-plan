@@ -457,22 +457,33 @@ class TestBundledPlans:
 
         stages = {stage.name: stage for stage in plan.stages}
         assert [s.name for s in plan.stages] == [
-            "opus",
-            "sonnet",
-            "gemini_pro",
-            "gpt5",
+            "claude_high",
+            "claude_medium",
+            "openai_high",
+            "openai_medium",
+            "gemini_high",
+            "gemini_low",
             "synthesis",
         ]
-        assert stages["gemini_pro"].produces == "Gemini Pro Analysis"
+        assert stages["gemini_high"].produces == "Gemini High Analysis"
         assert all(
             stages[name].prompt_label == "Instructions"
-            for name in ("opus", "sonnet", "gemini_pro", "gpt5")
+            for name in (
+                "claude_high",
+                "claude_medium",
+                "openai_high",
+                "openai_medium",
+                "gemini_high",
+                "gemini_low",
+            )
         )
         assert stages["synthesis"].depends_on == [
-            "opus",
-            "sonnet",
-            "gemini_pro",
-            "gpt5",
+            "claude_high",
+            "claude_medium",
+            "openai_high",
+            "openai_medium",
+            "gemini_high",
+            "gemini_low",
         ]
         assert stages["synthesis"].partial_dependencies is True
         assert stages["synthesis"].produces == "Final Synthesis"
@@ -494,8 +505,8 @@ class TestBundledPlans:
 
         assert result.exit_code == 0, result.stderr
         assert result.stdout.startswith("ECHO[")
-        assert "## Opus Analysis" in result.stdout
-        assert "## GPT-5 Analysis" in result.stdout
+        assert "## Claude High Analysis" in result.stdout
+        assert "## OpenAI High Analysis" in result.stdout
         assert "Synthesis Instructions" in result.stdout
         assert "the question" in result.stdout
 

@@ -31,8 +31,9 @@ installed: llm 0.31 imports `httpx`, which openai 3 no longer provides.
 
 ## Quick start
 
-Run the bundled `synthesis` plan: four models analyse your question in
-parallel, then a fifth reconciles their answers into a single response:
+Run the bundled `synthesis` plan: six models analyse your question in
+parallel — each provider's high and medium tier — then the high-tier Claude
+model reconciles their answers into a single response:
 
 ```bash
 llm plan synthesis "What are the trade-offs of a monorepo?" -f input-notes.md
