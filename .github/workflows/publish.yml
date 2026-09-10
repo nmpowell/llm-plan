@@ -19,8 +19,14 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
 
+  # Gates the upload on the artefact itself, not just the test suite: pytest
+  # reads the bundled plans from the source tree, so only this job would catch
+  # a wheel that ships without them.
+  package:
+    uses: ./.github/workflows/package.yml
+
   publish:
-    needs: [test]
+    needs: [test, package]
     runs-on: ubuntu-latest
     environment: release
     permissions:

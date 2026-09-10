@@ -22,51 +22,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
   package:
-    # Everything this plugin offers a user beyond the library itself is
-    # package *data* — the bundled plans, their prompts and the deep_research
-    # script. The whole test suite reads those from the source tree, so a
-    # packaging regression that drops them is invisible locally and only
-    # surfaces once someone installs the wheel. This job checks the artefact
-    # a user actually gets: that the data is in it, and that the bundled
-    # plans still resolve when run from site-packages outside the checkout.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          enable-cache: true
-          python-version: "3.14"
-      - run: uv build --no-sources
-      - run: uvx twine check --strict dist/*
-      - name: The bundled plan data must be in the wheel
-        run: |
-          uv run --no-project --python 3.14 python - "$(ls dist/*.whl)" <<'PY'
-          import sys, zipfile
-
-          required = {
-              "llm_plan/plans/_defaults.yaml",
-              "llm_plan/plans/plan_synthesis.yaml",
-              "llm_plan/plans/plan_deep_research.yaml",
-              "llm_plan/plans/prompts/synthesise.md",
-              "llm_plan/plans/prompts/expand_research.md",
-              "llm_plan/plans/scripts/deep_research.py",
-          }
-          shipped = set(zipfile.ZipFile(sys.argv[1]).namelist())
-          missing = sorted(required - shipped)
-          if missing:
-              sys.exit(f"missing from the wheel: {', '.join(missing)}")
-          print(f"all {len(required)} bundled data files present")
-          PY
-      - name: The bundled plans must resolve from the installed wheel
-        run: |
-          wheel="$(ls "$PWD"/dist/*.whl)"
-          cd /tmp
-          uv run --python 3.14 --with "$wheel" --with llm --no-project \
-            llm plan list
-          uv run --python 3.14 --with "$wheel" --with llm --no-project \
-            llm plan run synthesis "smoke" --explain < /dev/null
-          uv run --python 3.14 --with "$wheel" --with llm --no-project \
-            llm plan run deep_research "smoke" --explain < /dev/null
+    uses: ./.github/workflows/package.yml
   lint:
     runs-on: ubuntu-latest
     steps:

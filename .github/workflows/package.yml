@@ -1,0 +1,65 @@
+name: Package
+
+# Checks the artefact a user actually installs, rather than the checkout.
+#
+# Everything this plugin offers beyond the library is package *data* — the
+# bundled plans, their prompts and the deep_research script. The test suite
+# reads those from the source tree, and the repo uses a flat layout, so the
+# checkout is importable and a packaging regression that drops the data is
+# invisible locally. It would only surface once someone installed the wheel.
+#
+# Called by both test.yml (every push) and publish.yml (gating the upload),
+# so there is one definition of the packaging gate rather than two that drift.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - run: uv build --no-sources
+      - run: uvx twine check --strict dist/*
+      - name: The bundled plan data must be in the wheel
+        run: |
+          uv run --no-project --python 3.14 python - "$(ls dist/*.whl)" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          # Derived from what is on disk, not a hand-kept list, so a plan or
+          # prompt added later is covered without anyone remembering to add it.
+          root = pathlib.Path("llm_plan/plans")
+          expected = {
+              path.as_posix()
+              for path in root.rglob("*")
+              if path.is_file()
+              and "__pycache__" not in path.parts
+              and path.suffix != ".pyc"
+          }
+          if not expected:
+              sys.exit(f"found no bundled data under {root} — wrong directory?")
+
+          shipped = set(zipfile.ZipFile(sys.argv[1]).namelist())
+          missing = sorted(expected - shipped)
+          if missing:
+              sys.exit("missing from the wheel: " + ", ".join(missing))
+          print(f"all {len(expected)} bundled data files present")
+          PY
+      - name: The bundled plans must resolve from the installed wheel
+        run: |
+          wheel="$(ls "$PWD"/dist/*.whl)"
+          cd /tmp
+          uv run --python 3.14 --with "$wheel" --with llm --no-project \
+            llm plan list
+          uv run --python 3.14 --with "$wheel" --with llm --no-project \
+            llm plan run synthesis "smoke" --explain < /dev/null
+          uv run --python 3.14 --with "$wheel" --with llm --no-project \
+            llm plan run deep_research "smoke" --explain < /dev/null
